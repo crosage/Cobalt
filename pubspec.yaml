@@ -1,0 +1,34 @@
+name: paper_reader
+description: 会议论文精读 App — 左右翻页、搜索、笔记
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.7.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  # 网络
+  dio: ^5.4.0
+  # 状态管理
+  provider: ^6.1.0
+  # 本地存储
+  shared_preferences: ^2.2.0
+  # UI
+  google_fonts: ^6.1.0
+  flutter_markdown: ^0.6.18
+  markdown: ^7.3.0
+  shimmer: ^3.0.0
+  # URL 启动
+  url_launcher: ^6.2.0
+  # 下拉刷新
+  pull_to_refresh: ^2.0.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
