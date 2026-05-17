@@ -33,6 +33,15 @@ class ApiService {
 
   String get serverUrl => _baseUrl;
 
+  String resolveUrl(String url) {
+    final trimmed = url.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      return trimmed;
+    }
+    if (trimmed.startsWith('/')) return '$_baseUrl$trimmed';
+    return '$_baseUrl/$trimmed';
+  }
+
   Future<Stats> testServerUrl(String url) async {
     final normalized = _normalizeServerUrl(url);
     final dio = Dio(
@@ -152,6 +161,35 @@ class ApiService {
   Future<Map<String, String>> getSections(String paperId) async {
     final resp = await _dio.get('/api/papers/$paperId/sections');
     return (resp.data['sections'] as Map?)?.cast<String, String>() ?? {};
+  }
+
+  Future<List<String>> getPageImageUrls(String paperId, {int limit = 8}) async {
+    final resp = await _dio.get(
+      '/api/papers/$paperId/page-images',
+      queryParameters: {'limit': limit},
+    );
+    final images = (resp.data['images'] as List?) ?? [];
+    return images
+        .map((e) => (e as Map)['url']?.toString() ?? '')
+        .where((url) => url.isNotEmpty)
+        .map(resolveUrl)
+        .toList();
+  }
+
+  Future<List<Map<String, dynamic>>> getFigures(
+    String paperId, {
+    int limit = 16,
+  }) async {
+    final resp = await _dio.get(
+      '/api/papers/$paperId/figures',
+      queryParameters: {'limit': limit},
+    );
+    final figures = (resp.data['figures'] as List?) ?? [];
+    return figures.map((e) {
+      final item = (e as Map).cast<String, dynamic>();
+      final url = item['url']?.toString() ?? '';
+      return {...item, 'url': url.isEmpty ? '' : resolveUrl(url)};
+    }).toList();
   }
 
   // ── 阅读状态 ──

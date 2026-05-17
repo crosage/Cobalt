@@ -7,7 +7,7 @@ import '../models/models.dart';
 import '../services/api_service.dart';
 import '../widgets/responsive.dart';
 
-/// 核心阅读页面 — 左右翻页浏览论文
+/// 核心阅读页面 — 当前论文内横滑查看原文、插图、翻译和笔记
 class PaperReaderPage extends StatefulWidget {
   final List<Paper> papers;
   final int initialIndex;
@@ -25,7 +25,6 @@ class PaperReaderPage extends StatefulWidget {
 }
 
 class _PaperReaderPageState extends State<PaperReaderPage> {
-  late PageController _pageController;
   late int _currentIndex;
   final _api = ApiService();
 
@@ -39,16 +38,12 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
-    _pageController = PageController(initialPage: _currentIndex);
     _loadDetail(widget.papers[_currentIndex].id);
     _api.updateReadingStatus(widget.papers[_currentIndex].id, 'reading');
   }
 
   @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
-  }
+  void dispose() => super.dispose();
 
   Future<void> _loadDetail(String paperId) async {
     if (_detailCache.containsKey(paperId) || _loadingIds.contains(paperId)) {
@@ -186,18 +181,13 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
     _pollingTranslationIds.remove(paperId);
   }
 
-  void _onPageChanged(int index) {
+  void _goToPaper(int index) {
+    if (index < 0 || index >= widget.papers.length) return;
     HapticFeedback.selectionClick();
     setState(() => _currentIndex = index);
     final paper = widget.papers[index];
     _loadDetail(paper.id);
     _api.updateReadingStatus(paper.id, 'reading');
-    if (index > 0) {
-      _loadDetail(widget.papers[index - 1].id);
-    }
-    if (index < widget.papers.length - 1) {
-      _loadDetail(widget.papers[index + 1].id);
-    }
     if (index >= widget.papers.length - 3 && widget.onLoadMore != null) {
       widget.onLoadMore!();
     }
@@ -267,6 +257,20 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
         centerTitle: true,
         actions: [
           IconButton(
+            icon: const Icon(Icons.chevron_left_rounded),
+            tooltip: '上一篇',
+            onPressed:
+                _currentIndex > 0 ? () => _goToPaper(_currentIndex - 1) : null,
+          ),
+          IconButton(
+            icon: const Icon(Icons.chevron_right_rounded),
+            tooltip: '下一篇',
+            onPressed:
+                _currentIndex < widget.papers.length - 1
+                    ? () => _goToPaper(_currentIndex + 1)
+                    : null,
+          ),
+          IconButton(
             icon: Container(
               padding: const EdgeInsets.all(6),
               decoration: BoxDecoration(
@@ -289,24 +293,16 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
         ],
       ),
       extendBodyBehindAppBar: false,
-      body: PageView.builder(
-        controller: _pageController,
-        onPageChanged: _onPageChanged,
-        itemCount: widget.papers.length,
-        itemBuilder: (ctx, index) {
-          final p = widget.papers[index];
-          final d = _detailCache[p.id];
-          return _PaperView(
-            paper: d ?? p,
-            isLoading: _loadingIds.contains(p.id),
-            isAnalyzing: _analyzingIds.contains(p.id),
-            isTranslating: _translatingIds.contains(p.id),
-            onAnalyze: () => _triggerAnalysis(p.id),
-            onTranslate: () => _triggerTranslation(p.id),
-            onAddNote: (content) => _addNote(p.id, content),
-            onDeleteNote: (noteId) => _deleteNote(p.id, noteId),
-          );
-        },
+      body: _PaperView(
+        key: ValueKey(effectivePaper.id),
+        paper: effectivePaper,
+        isLoading: _loadingIds.contains(paper.id),
+        isAnalyzing: _analyzingIds.contains(paper.id),
+        isTranslating: _translatingIds.contains(paper.id),
+        onAnalyze: () => _triggerAnalysis(paper.id),
+        onTranslate: () => _triggerTranslation(paper.id),
+        onAddNote: (content) => _addNote(paper.id, content),
+        onDeleteNote: (noteId) => _deleteNote(paper.id, noteId),
       ),
     );
   }
@@ -410,95 +406,94 @@ class _PaperView extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final horizontalPadding = Responsive.horizontalPadding(context);
+    Widget tabScroll(List<Widget> children) {
+      return SingleChildScrollView(
+        physics: const BouncingScrollPhysics(),
+        padding: EdgeInsets.fromLTRB(horizontalPadding, 18, horizontalPadding, 40),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
+      );
+    }
 
-    return SingleChildScrollView(
-      physics: const BouncingScrollPhysics(),
+    final abstractWidget =
+        paper.abstract.isNotEmpty
+            ? _SectionCard(
+              icon: Icons.subject_rounded,
+              title: 'Abstract',
+              color: cs.primary,
+              child: SelectableText(
+                paper.abstract,
+                style: TextStyle(
+                  fontSize: 14,
+                  height: 1.8,
+                  color: cs.onSurface.withOpacity(0.85),
+                ),
+              ),
+            )
+            : isLoading
+                ? _LoadingCard()
+                : _EmptyStateCard(
+                  icon: Icons.subject_rounded,
+                  title: '暂无原文摘要',
+                  subtitle: '可以打开 PDF 原文或等待后端提取章节。',
+                );
+
+    return DefaultTabController(
+      length: 5,
       child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Hero 区域: 渐变背景 + 标题 ──
           _HeroSection(paper: paper),
-
-          Padding(
-            padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+          Material(
+            color: cs.surface,
+            child: TabBar(
+              isScrollable: true,
+              tabs: const [
+                Tab(icon: Icon(Icons.article_rounded), text: '原文'),
+                Tab(icon: Icon(Icons.image_rounded), text: '插图'),
+                Tab(icon: Icon(Icons.translate_rounded), text: '翻译'),
+                Tab(icon: Icon(Icons.auto_awesome_rounded), text: '解读'),
+                Tab(icon: Icon(Icons.edit_note_rounded), text: '笔记'),
+              ],
+            ),
+          ),
+          Expanded(
+            child: TabBarView(
               children: [
-                const SizedBox(height: 20),
-
-                // ── 查看原文 快捷入口 ──
-                _OriginalLinksBar(paper: paper),
-
-                const SizedBox(height: 24),
-
-                // ── Abstract ──
-                if (paper.abstract.isNotEmpty) ...[
-                  _SectionCard(
-                    icon: Icons.subject_rounded,
-                    title: 'Abstract',
-                    color: cs.primary,
-                    child: SelectableText(
-                      paper.abstract,
-                      style: TextStyle(
-                        fontSize: 14,
-                        height: 1.8,
-                        color: cs.onSurface.withOpacity(0.85),
+                tabScroll([
+                  _OriginalLinksBar(paper: paper),
+                  const SizedBox(height: 18),
+                  abstractWidget,
+                ]),
+                _FiguresSection(paperId: paper.id),
+                tabScroll([
+                  _TranslationSection(
+                    paper: paper,
+                    isTranslating: isTranslating,
+                    onTranslate: onTranslate,
+                  ),
+                ]),
+                tabScroll([
+                  _AnalysisSection(
+                    paper: paper,
+                    isAnalyzing: isAnalyzing,
+                    onAnalyze: onAnalyze,
+                  ),
+                  if (paper.tokenCount != null && paper.tokenCount! > 0) ...[
+                    const SizedBox(height: 16),
+                    Center(
+                      child: _MetaChip(
+                        icon: Icons.memory_rounded,
+                        label: '${paper.llmModel ?? ""} · ${paper.tokenCount} tokens',
                       ),
                     ),
+                  ],
+                ]),
+                tabScroll([
+                  _NotesSection(
+                    paper: paper,
+                    onAddNote: onAddNote,
+                    onDeleteNote: onDeleteNote,
                   ),
-                  const SizedBox(height: 16),
-                ] else if (isLoading) ...[
-                  _LoadingCard(),
-                  const SizedBox(height: 16),
-                ],
-
-                // ── LLM 解读 ──
-                _AnalysisSection(
-                  paper: paper,
-                  isAnalyzing: isAnalyzing,
-                  onAnalyze: onAnalyze,
-                ),
-                const SizedBox(height: 16),
-
-                _TranslationSection(
-                  paper: paper,
-                  isTranslating: isTranslating,
-                  onTranslate: onTranslate,
-                ),
-                const SizedBox(height: 16),
-
-                // ── 笔记 ──
-                _NotesSection(
-                  paper: paper,
-                  onAddNote: onAddNote,
-                  onDeleteNote: onDeleteNote,
-                ),
-
-                const SizedBox(height: 32),
-
-                // ── 底部 meta ──
-                if (paper.tokenCount != null && paper.tokenCount! > 0)
-                  Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 6,
-                      ),
-                      decoration: BoxDecoration(
-                        color: cs.surfaceContainerHighest.withOpacity(0.5),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(
-                        '${paper.llmModel ?? ""} · ${paper.tokenCount} tokens',
-                        style: TextStyle(
-                          fontSize: 11,
-                          color: cs.outline,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 40),
+                ]),
               ],
             ),
           ),
@@ -869,6 +864,202 @@ class _LoadingCard extends StatelessWidget {
   }
 }
 
+class _EmptyStateCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  const _EmptyStateCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(28),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: cs.outlineVariant.withOpacity(0.25)),
+      ),
+      child: Column(
+        children: [
+          Icon(icon, size: 30, color: cs.outline),
+          const SizedBox(height: 10),
+          Text(
+            title,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.w700,
+              color: cs.onSurface,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Text(
+            subtitle,
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 12, height: 1.5, color: cs.outline),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _FiguresSection extends StatefulWidget {
+  final String paperId;
+
+  const _FiguresSection({required this.paperId});
+
+  @override
+  State<_FiguresSection> createState() => _FiguresSectionState();
+}
+
+class _FiguresSectionState extends State<_FiguresSection> {
+  final _api = ApiService();
+  bool _loading = true;
+  String? _error;
+  List<Map<String, dynamic>> _figures = [];
+  List<String> _pages = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() {
+      _loading = true;
+      _error = null;
+    });
+    try {
+      final results = await Future.wait([
+        _api.getFigures(widget.paperId),
+        _api.getPageImageUrls(widget.paperId, limit: 6),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _figures = (results[0] as List).cast<Map<String, dynamic>>();
+        _pages = (results[1] as List).cast<String>();
+        _loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e.toString();
+        _loading = false;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final horizontalPadding = Responsive.horizontalPadding(context);
+    if (_loading) {
+      return Padding(
+        padding: EdgeInsets.all(horizontalPadding),
+        child: _LoadingCard(),
+      );
+    }
+    if (_error != null) {
+      return Padding(
+        padding: EdgeInsets.all(horizontalPadding),
+        child: _EmptyStateCard(
+          icon: Icons.broken_image_outlined,
+          title: '插图提取失败',
+          subtitle: _error!,
+        ),
+      );
+    }
+
+    final hasFigures = _figures.isNotEmpty;
+    final imageItems =
+        hasFigures
+            ? _figures
+                .map((fig) => (
+                      url: fig['url']?.toString() ?? '',
+                      title: fig['label']?.toString() ?? 'Figure',
+                      caption: fig['caption']?.toString() ?? '',
+                    ))
+                .where((item) => item.url.isNotEmpty)
+                .toList()
+            : _pages
+                .asMap()
+                .entries
+                .map((entry) => (
+                      url: entry.value,
+                      title: 'Page ${entry.key + 1}',
+                      caption: '未检测到明确 Figure caption，显示 PDF 页面快照。',
+                    ))
+                .toList();
+
+    if (imageItems.isEmpty) {
+      return Padding(
+        padding: EdgeInsets.all(horizontalPadding),
+        child: _EmptyStateCard(
+          icon: Icons.image_not_supported_rounded,
+          title: '暂无可显示插图',
+          subtitle: '后端没有从 PDF 中提取到图片或页面快照。',
+        ),
+      );
+    }
+
+    return ListView.separated(
+      physics: const BouncingScrollPhysics(),
+      padding: EdgeInsets.fromLTRB(horizontalPadding, 18, horizontalPadding, 40),
+      itemCount: imageItems.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 14),
+      itemBuilder: (context, index) {
+        final item = imageItems[index];
+        return Container(
+          decoration: BoxDecoration(
+            color: cs.surfaceContainerLowest,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: cs.outlineVariant.withOpacity(0.25)),
+          ),
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                item.title,
+                style: TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w700,
+                  color: cs.primary,
+                ),
+              ),
+              const SizedBox(height: 10),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: Container(
+                  width: double.infinity,
+                  constraints: const BoxConstraints(maxHeight: 520),
+                  color: cs.surfaceContainerHigh,
+                  child: Image.network(item.url, fit: BoxFit.contain),
+                ),
+              ),
+              if (item.caption.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                SelectableText(
+                  item.caption,
+                  style: TextStyle(fontSize: 12, height: 1.5, color: cs.outline),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // LLM 解读区域
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1203,9 +1394,10 @@ class _MarkdownImage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    final imageUrl = uri.toString();
+    final rawUrl = uri.toString();
+    final imageUrl = ApiService().resolveUrl(rawUrl);
 
-    if (!uri.hasScheme || imageUrl.isEmpty) {
+    if (rawUrl.isEmpty) {
       return _MarkdownImagePlaceholder(
         label: alt?.isNotEmpty == true ? alt! : '暂不支持的本地图片',
       );
