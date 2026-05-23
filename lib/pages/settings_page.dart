@@ -121,7 +121,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       TextField(
                         controller: _urlController,
                         decoration: InputDecoration(
-                          hintText: 'http://your-server:8000',
+                          hintText: ApiService.defaultServerUrl,
                           hintStyle: TextStyle(
                             color: cs.outline.withOpacity(0.4),
                           ),
@@ -236,7 +236,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       _StepRow(
                         num: '2',
                         title: '配置服务器地址',
-                        code: 'http://192.168.x.x:8000',
+                        code: ApiService.defaultServerUrl,
                         icon: Icons.link_rounded,
                         color: cs.tertiary,
                       ),

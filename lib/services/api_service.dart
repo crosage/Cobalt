@@ -3,8 +3,10 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/models.dart';
 
 class ApiService {
+  static const String defaultServerUrl = 'https://paper-api.zundamon.bond';
+
   late Dio _dio;
-  String _baseUrl = 'http://10.70.199.159:8000';
+  String _baseUrl = defaultServerUrl;
 
   static final ApiService _instance = ApiService._internal();
   factory ApiService() => _instance;
@@ -20,7 +22,7 @@ class ApiService {
 
   Future<void> init() async {
     final prefs = await SharedPreferences.getInstance();
-    _baseUrl = prefs.getString('server_url') ?? 'http://10.70.199.159:8000';
+    _baseUrl = prefs.getString('server_url') ?? defaultServerUrl;
     _dio.options.baseUrl = _baseUrl;
   }
 
