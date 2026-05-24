@@ -392,6 +392,7 @@ class _PaperView extends StatelessWidget {
   final Future<void> Function(int noteId) onDeleteNote;
 
   const _PaperView({
+    super.key,
     required this.paper,
     required this.isLoading,
     required this.isAnalyzing,
@@ -409,8 +410,16 @@ class _PaperView extends StatelessWidget {
     Widget tabScroll(List<Widget> children) {
       return SingleChildScrollView(
         physics: const BouncingScrollPhysics(),
-        padding: EdgeInsets.fromLTRB(horizontalPadding, 18, horizontalPadding, 40),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: children),
+        padding: EdgeInsets.fromLTRB(
+          horizontalPadding,
+          18,
+          horizontalPadding,
+          40,
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: children,
+        ),
       );
     }
 
@@ -430,12 +439,12 @@ class _PaperView extends StatelessWidget {
               ),
             )
             : isLoading
-                ? _LoadingCard()
-                : _EmptyStateCard(
-                  icon: Icons.subject_rounded,
-                  title: '暂无原文摘要',
-                  subtitle: '可以打开 PDF 原文或等待后端提取章节。',
-                );
+            ? _LoadingCard()
+            : _EmptyStateCard(
+              icon: Icons.subject_rounded,
+              title: '暂无原文摘要',
+              subtitle: '可以打开 PDF 原文或等待后端提取章节。',
+            );
 
     return DefaultTabController(
       length: 5,
@@ -482,7 +491,8 @@ class _PaperView extends StatelessWidget {
                     Center(
                       child: _MetaChip(
                         icon: Icons.memory_rounded,
-                        label: '${paper.llmModel ?? ""} · ${paper.tokenCount} tokens',
+                        label:
+                            '${paper.llmModel ?? ""} · ${paper.tokenCount} tokens',
                       ),
                     ),
                   ],
@@ -982,21 +992,25 @@ class _FiguresSectionState extends State<_FiguresSection> {
     final imageItems =
         hasFigures
             ? _figures
-                .map((fig) => (
-                      url: fig['url']?.toString() ?? '',
-                      title: fig['label']?.toString() ?? 'Figure',
-                      caption: fig['caption']?.toString() ?? '',
-                    ))
+                .map(
+                  (fig) => (
+                    url: fig['url']?.toString() ?? '',
+                    title: fig['label']?.toString() ?? 'Figure',
+                    caption: fig['caption']?.toString() ?? '',
+                  ),
+                )
                 .where((item) => item.url.isNotEmpty)
                 .toList()
             : _pages
                 .asMap()
                 .entries
-                .map((entry) => (
-                      url: entry.value,
-                      title: 'Page ${entry.key + 1}',
-                      caption: '未检测到明确 Figure caption，显示 PDF 页面快照。',
-                    ))
+                .map(
+                  (entry) => (
+                    url: entry.value,
+                    title: 'Page ${entry.key + 1}',
+                    caption: '未检测到明确 Figure caption，显示 PDF 页面快照。',
+                  ),
+                )
                 .toList();
 
     if (imageItems.isEmpty) {
@@ -1012,7 +1026,12 @@ class _FiguresSectionState extends State<_FiguresSection> {
 
     return ListView.separated(
       physics: const BouncingScrollPhysics(),
-      padding: EdgeInsets.fromLTRB(horizontalPadding, 18, horizontalPadding, 40),
+      padding: EdgeInsets.fromLTRB(
+        horizontalPadding,
+        18,
+        horizontalPadding,
+        40,
+      ),
       itemCount: imageItems.length,
       separatorBuilder: (_, __) => const SizedBox(height: 14),
       itemBuilder: (context, index) {
@@ -1049,7 +1068,11 @@ class _FiguresSectionState extends State<_FiguresSection> {
                 const SizedBox(height: 8),
                 SelectableText(
                   item.caption,
-                  style: TextStyle(fontSize: 12, height: 1.5, color: cs.outline),
+                  style: TextStyle(
+                    fontSize: 12,
+                    height: 1.5,
+                    color: cs.outline,
+                  ),
                 ),
               ],
             ],
