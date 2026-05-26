@@ -1,7 +1,8 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-  <path d="M10 2v7.31"/>
-  <path d="M14 9.3V2"/>
-  <path d="M8.5 2h7"/>
-  <path d="M14 9.3a6.5 6.5 0 1 1-4 0"/>
-  <path d="M5.52 16h12.96"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="Erlenmeyer flask app icon">
+  <rect width="1024" height="1024" fill="#fff"/>
+  <g fill="none" stroke="#000" stroke-width="74" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M405 140h214"/>
+    <path d="M438 140v276L245 782c-34 64 12 142 85 142h364c73 0 119-78 85-142L586 416V140"/>
+    <path d="M322 676h380"/>
+  </g>
 </svg>
