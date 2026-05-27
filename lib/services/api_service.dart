@@ -155,6 +155,11 @@ class ApiService {
     return (resp.data as Map).cast<String, dynamic>();
   }
 
+  Future<Map<String, dynamic>> getAnalysisQueueStatus() async {
+    final resp = await _dio.get('/api/analyses/status');
+    return (resp.data as Map).cast<String, dynamic>();
+  }
+
   Future<void> deleteAnalysis(String paperId) async {
     await _dio.delete('/api/papers/$paperId/analyze');
   }
@@ -181,6 +186,11 @@ class ApiService {
 
   Future<Map<String, dynamic>> getTranslationStatus(String paperId) async {
     final resp = await _dio.get('/api/papers/$paperId/translate/status');
+    return (resp.data as Map).cast<String, dynamic>();
+  }
+
+  Future<Map<String, dynamic>> getTranslationQueueStatus() async {
+    final resp = await _dio.get('/api/translations/status');
     return (resp.data as Map).cast<String, dynamic>();
   }
 

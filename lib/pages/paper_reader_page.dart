@@ -34,12 +34,15 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
   final Set<String> _translatingIds = {};
   final Set<String> _pollingAnalysisIds = {};
   final Set<String> _pollingTranslationIds = {};
+  Map<String, dynamic>? _analysisQueueStatus;
+  Map<String, dynamic>? _translationQueueStatus;
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
     _loadDetail(widget.papers[_currentIndex].id);
+    _loadQueueStatuses();
     _api.updateReadingStatus(widget.papers[_currentIndex].id, 'reading');
   }
 
@@ -87,6 +90,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
     setState(() => _analyzingIds.add(paperId));
     try {
       final result = await _api.queueAnalysis(paperId, force: force);
+      await _loadQueueStatuses();
       final status = result['status']?.toString() ?? 'queued';
       if (status == 'cached') {
         final detail = await _api.getPaper(paperId);
@@ -128,6 +132,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
     try {
       await _api.deleteAnalysis(paperId);
       final detail = await _api.getPaper(paperId);
+      await _loadQueueStatuses();
       setState(() {
         _detailCache[paperId] = detail;
         _analyzingIds.remove(paperId);
@@ -152,6 +157,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
       if (!mounted || !_analyzingIds.contains(paperId)) break;
       try {
         final status = await _api.getAnalysisStatus(paperId);
+        await _loadQueueStatuses();
         if (status['cached'] == true) {
           final detail = await _api.getPaper(paperId);
           if (!mounted) break;
@@ -184,6 +190,20 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
     await _queueTranslation(paperId);
   }
 
+  Future<void> _loadQueueStatuses() async {
+    try {
+      final results = await Future.wait([
+        _api.getAnalysisQueueStatus(),
+        _api.getTranslationQueueStatus(),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _analysisQueueStatus = results[0];
+        _translationQueueStatus = results[1];
+      });
+    } catch (_) {}
+  }
+
   Future<void> _queueTranslation(
     String paperId, {
     bool showSnackBar = true,
@@ -192,6 +212,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
     setState(() => _translatingIds.add(paperId));
     try {
       final result = await _api.queueTranslation(paperId);
+      await _loadQueueStatuses();
       final status = result['status']?.toString() ?? 'queued';
       if (status == 'cached') {
         final detail = await _api.getPaper(paperId);
@@ -237,6 +258,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
       if (!mounted || !_translatingIds.contains(paperId)) break;
       try {
         final status = await _api.getTranslationStatus(paperId);
+        await _loadQueueStatuses();
         if (status['cached'] == true) {
           final detail = await _api.getPaper(paperId);
           if (!mounted) break;
@@ -271,6 +293,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
     setState(() => _currentIndex = index);
     final paper = widget.papers[index];
     _loadDetail(paper.id);
+    _loadQueueStatuses();
     _api.updateReadingStatus(paper.id, 'reading');
     if (index >= widget.papers.length - 3 && widget.onLoadMore != null) {
       widget.onLoadMore!();
@@ -383,6 +406,8 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
         isLoading: _loadingIds.contains(paper.id),
         isAnalyzing: _analyzingIds.contains(paper.id),
         isTranslating: _translatingIds.contains(paper.id),
+        analysisQueueStatus: _analysisQueueStatus,
+        translationQueueStatus: _translationQueueStatus,
         onAnalyze: () => _triggerAnalysis(paper.id),
         onReanalyze: () => _triggerAnalysis(paper.id, force: true),
         onDeleteAnalysis: () => _deleteAnalysis(paper.id),
@@ -472,6 +497,8 @@ class _PaperView extends StatelessWidget {
   final bool isLoading;
   final bool isAnalyzing;
   final bool isTranslating;
+  final Map<String, dynamic>? analysisQueueStatus;
+  final Map<String, dynamic>? translationQueueStatus;
   final VoidCallback onAnalyze;
   final VoidCallback onReanalyze;
   final VoidCallback onDeleteAnalysis;
@@ -485,6 +512,8 @@ class _PaperView extends StatelessWidget {
     required this.isLoading,
     required this.isAnalyzing,
     required this.isTranslating,
+    required this.analysisQueueStatus,
+    required this.translationQueueStatus,
     required this.onAnalyze,
     required this.onReanalyze,
     required this.onDeleteAnalysis,
@@ -567,6 +596,7 @@ class _PaperView extends StatelessWidget {
                   _TranslationSection(
                     paper: paper,
                     isTranslating: isTranslating,
+                    queueStatus: translationQueueStatus,
                     onTranslate: onTranslate,
                   ),
                 ]),
@@ -574,6 +604,7 @@ class _PaperView extends StatelessWidget {
                   _AnalysisSection(
                     paper: paper,
                     isAnalyzing: isAnalyzing,
+                    queueStatus: analysisQueueStatus,
                     onAnalyze: onAnalyze,
                     onReanalyze: onReanalyze,
                     onDeleteAnalysis: onDeleteAnalysis,
@@ -1182,6 +1213,7 @@ class _FiguresSectionState extends State<_FiguresSection> {
 class _AnalysisSection extends StatelessWidget {
   final Paper paper;
   final bool isAnalyzing;
+  final Map<String, dynamic>? queueStatus;
   final VoidCallback onAnalyze;
   final VoidCallback onReanalyze;
   final VoidCallback onDeleteAnalysis;
@@ -1189,6 +1221,7 @@ class _AnalysisSection extends StatelessWidget {
   const _AnalysisSection({
     required this.paper,
     required this.isAnalyzing,
+    required this.queueStatus,
     required this.onAnalyze,
     required this.onReanalyze,
     required this.onDeleteAnalysis,
@@ -1208,6 +1241,8 @@ class _AnalysisSection extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            _QueueStatusCard(kind: '解读', status: queueStatus),
+            const SizedBox(height: 12),
             Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -1245,6 +1280,8 @@ class _AnalysisSection extends StatelessWidget {
         ),
         child: Column(
           children: [
+            _QueueStatusCard(kind: '解读', status: queueStatus),
+            const SizedBox(height: 16),
             SizedBox(
               width: 40,
               height: 40,
@@ -1287,6 +1324,8 @@ class _AnalysisSection extends StatelessWidget {
       ),
       child: Column(
         children: [
+          _QueueStatusCard(kind: '解读', status: queueStatus),
+          const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(16),
             decoration: BoxDecoration(
@@ -1339,11 +1378,13 @@ class _AnalysisSection extends StatelessWidget {
 class _TranslationSection extends StatelessWidget {
   final Paper paper;
   final bool isTranslating;
+  final Map<String, dynamic>? queueStatus;
   final VoidCallback onTranslate;
 
   const _TranslationSection({
     required this.paper,
     required this.isTranslating,
+    required this.queueStatus,
     required this.onTranslate,
   });
 
@@ -1360,6 +1401,8 @@ class _TranslationSection extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            _QueueStatusCard(kind: '翻译', status: queueStatus),
+            const SizedBox(height: 12),
             if ((paper.translationModel ?? '').isNotEmpty ||
                 (paper.translationCreatedAt ?? '').isNotEmpty) ...[
               Wrap(
@@ -1396,6 +1439,8 @@ class _TranslationSection extends StatelessWidget {
       ),
       child: Column(
         children: [
+          _QueueStatusCard(kind: '翻译', status: queueStatus),
+          const SizedBox(height: 16),
           Icon(Icons.translate_rounded, size: 30, color: cs.tertiary),
           const SizedBox(height: 12),
           Text(
@@ -1651,6 +1696,79 @@ class _MetaChip extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+class _QueueStatusCard extends StatelessWidget {
+  final String kind;
+  final Map<String, dynamic>? status;
+
+  const _QueueStatusCard({required this.kind, required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    if (status == null) return const SizedBox.shrink();
+    final cs = Theme.of(context).colorScheme;
+    final running = status!['running'] ?? 0;
+    final queued = status!['queued'] ?? 0;
+    final failed = status!['failed'] ?? 0;
+    final recentJobs = (status!['recent_jobs'] as List?) ?? const [];
+    final visibleJobs =
+        recentJobs
+            .whereType<Map>()
+            .where((job) {
+              final s = job['status']?.toString() ?? '';
+              return s == 'running' || s == 'queued' || s == 'failed';
+            })
+            .take(3)
+            .toList();
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHigh.withOpacity(0.7),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cs.outlineVariant.withOpacity(0.25)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 8,
+            runSpacing: 6,
+            children: [
+              _MetaChip(icon: Icons.play_circle_outline_rounded, label: '$kind运行 $running'),
+              _MetaChip(icon: Icons.schedule_rounded, label: '排队 $queued'),
+              _MetaChip(icon: Icons.error_outline_rounded, label: '失败 $failed'),
+            ],
+          ),
+          if (visibleJobs.isNotEmpty) ...[
+            const SizedBox(height: 10),
+            for (final job in visibleJobs)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '${_jobStatusText(job['status']?.toString() ?? '')} · ${job['title'] ?? job['paper_id'] ?? ''}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+                ),
+              ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  static String _jobStatusText(String status) {
+    return switch (status) {
+      'running' => '运行中',
+      'queued' => '排队中',
+      'failed' => '失败',
+      'done' => '完成',
+      _ => status,
+    };
   }
 }
 
