@@ -8,6 +8,8 @@ import '../services/api_service.dart';
 import '../widgets/responsive.dart';
 import 'paper_reader_page.dart';
 
+enum _BatchQueueAction { analysis, translation, both }
+
 class PaperListPage extends StatefulWidget {
   const PaperListPage({super.key});
 
@@ -31,6 +33,7 @@ class _PaperListPageState extends State<PaperListPage> {
   bool _loading = false;
   bool _loadingMore = false;
   bool _researchLoading = false;
+  bool _batchQueueing = false;
   bool _syncing = false;
   String? _error;
   String? _researchError;
@@ -231,6 +234,64 @@ class _PaperListPageState extends State<PaperListPage> {
     ).then((_) => _loadPapers());
   }
 
+  Future<void> _queueBatch(_BatchQueueAction action) async {
+    if (_batchQueueing || _papers.isEmpty) return;
+    final queueAnalysis =
+        action == _BatchQueueAction.analysis || action == _BatchQueueAction.both;
+    final queueTranslation =
+        action == _BatchQueueAction.translation ||
+        action == _BatchQueueAction.both;
+    final targets =
+        _papers.where((paper) {
+          final needsAnalysis = queueAnalysis && !paper.hasAnalysis;
+          final needsTranslation = queueTranslation && !paper.hasTranslation;
+          return needsAnalysis || needsTranslation;
+        }).toList();
+
+    if (targets.isEmpty) {
+      _showBatchSnack('当前已加载列表没有需要加入队列的论文');
+      return;
+    }
+
+    setState(() => _batchQueueing = true);
+    var queued = 0;
+    var failed = 0;
+    try {
+      for (final paper in targets) {
+        try {
+          if (queueAnalysis && !paper.hasAnalysis) {
+            await _api.queueAnalysis(paper.id);
+            queued += 1;
+          }
+          if (queueTranslation && !paper.hasTranslation) {
+            await _api.queueTranslation(paper.id);
+            queued += 1;
+          }
+        } catch (_) {
+          failed += 1;
+        }
+      }
+      if (!mounted) return;
+      _showBatchSnack(
+        failed == 0 ? '已加入 $queued 个后台任务' : '已加入 $queued 个任务，$failed 篇失败',
+      );
+      await Future.wait([_loadQueueStatuses(), _loadPapers()]);
+    } finally {
+      if (mounted) setState(() => _batchQueueing = false);
+    }
+  }
+
+  void _showBatchSnack(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -298,6 +359,10 @@ class _PaperListPageState extends State<PaperListPage> {
               centerTitle: false,
               titleSpacing: isCompact ? 12 : 16, // 控制搜索框左侧的间距
               actions: [
+                _BatchQueueButton(
+                  busy: _batchQueueing,
+                  onSelected: _queueBatch,
+                ),
                 // 同步按钮依然保留在最右侧
                 _SyncButton(
                   conferences: _conferences,
@@ -706,6 +771,66 @@ class _ResearchResultTile extends StatelessWidget {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // 同步按钮 (带 sheet)
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+class _BatchQueueButton extends StatelessWidget {
+  final bool busy;
+  final ValueChanged<_BatchQueueAction> onSelected;
+
+  const _BatchQueueButton({required this.busy, required this.onSelected});
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    if (busy) {
+      return Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Center(
+          child: SizedBox(
+            width: 20,
+            height: 20,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.4,
+              color: cs.primary,
+            ),
+          ),
+        ),
+      );
+    }
+
+    return PopupMenuButton<_BatchQueueAction>(
+      tooltip: '批量加入队列',
+      icon: Icon(Icons.playlist_add_rounded, color: cs.primary),
+      onSelected: onSelected,
+      itemBuilder:
+          (context) => const [
+            PopupMenuItem(
+              value: _BatchQueueAction.analysis,
+              child: ListTile(
+                dense: true,
+                leading: Icon(Icons.auto_awesome_rounded),
+                title: Text('批量解读'),
+              ),
+            ),
+            PopupMenuItem(
+              value: _BatchQueueAction.translation,
+              child: ListTile(
+                dense: true,
+                leading: Icon(Icons.translate_rounded),
+                title: Text('批量翻译'),
+              ),
+            ),
+            PopupMenuItem(
+              value: _BatchQueueAction.both,
+              child: ListTile(
+                dense: true,
+                leading: Icon(Icons.library_add_check_rounded),
+                title: Text('两者都加入'),
+              ),
+            ),
+          ],
+    );
+  }
+}
 
 class _SyncButton extends StatelessWidget {
   final List<Conference> conferences;
