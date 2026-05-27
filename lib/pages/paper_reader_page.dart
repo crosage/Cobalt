@@ -186,8 +186,8 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
     _pollingAnalysisIds.remove(paperId);
   }
 
-  Future<void> _triggerTranslation(String paperId) async {
-    await _queueTranslation(paperId);
+  Future<void> _triggerTranslation(String paperId, {bool force = false}) async {
+    await _queueTranslation(paperId, force: force);
   }
 
   Future<void> _loadQueueStatuses() async {
@@ -206,12 +206,13 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
 
   Future<void> _queueTranslation(
     String paperId, {
+    bool force = false,
     bool showSnackBar = true,
   }) async {
     if (_translatingIds.contains(paperId)) return;
     setState(() => _translatingIds.add(paperId));
     try {
-      final result = await _api.queueTranslation(paperId);
+      final result = await _api.queueTranslation(paperId, force: force);
       await _loadQueueStatuses();
       final status = result['status']?.toString() ?? 'queued';
       if (status == 'cached') {
@@ -412,6 +413,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
         onReanalyze: () => _triggerAnalysis(paper.id, force: true),
         onDeleteAnalysis: () => _deleteAnalysis(paper.id),
         onTranslate: () => _triggerTranslation(paper.id),
+        onRetranslate: () => _triggerTranslation(paper.id, force: true),
         onAddNote: (content) => _addNote(paper.id, content),
         onDeleteNote: (noteId) => _deleteNote(paper.id, noteId),
       ),
@@ -503,6 +505,7 @@ class _PaperView extends StatelessWidget {
   final VoidCallback onReanalyze;
   final VoidCallback onDeleteAnalysis;
   final VoidCallback onTranslate;
+  final VoidCallback onRetranslate;
   final Future<void> Function(String content) onAddNote;
   final Future<void> Function(int noteId) onDeleteNote;
 
@@ -518,6 +521,7 @@ class _PaperView extends StatelessWidget {
     required this.onReanalyze,
     required this.onDeleteAnalysis,
     required this.onTranslate,
+    required this.onRetranslate,
     required this.onAddNote,
     required this.onDeleteNote,
   });
@@ -573,7 +577,8 @@ class _PaperView extends StatelessWidget {
           Material(
             color: cs.surface,
             child: TabBar(
-              isScrollable: true,
+              isScrollable: false,
+              labelPadding: EdgeInsets.zero,
               tabs: const [
                 Tab(icon: Icon(Icons.article_rounded), text: '原文'),
                 Tab(icon: Icon(Icons.image_rounded), text: '插图'),
@@ -598,6 +603,7 @@ class _PaperView extends StatelessWidget {
                     isTranslating: isTranslating,
                     queueStatus: translationQueueStatus,
                     onTranslate: onTranslate,
+                    onRetranslate: onRetranslate,
                   ),
                 ]),
                 tabScroll([
@@ -1120,6 +1126,7 @@ class _FiguresSectionState extends State<_FiguresSection> {
                     url: fig['url']?.toString() ?? '',
                     title: fig['label']?.toString() ?? 'Figure',
                     caption: fig['caption']?.toString() ?? '',
+                    source: fig['source']?.toString() ?? '',
                   ),
                 )
                 .where((item) => item.url.isNotEmpty)
@@ -1132,6 +1139,7 @@ class _FiguresSectionState extends State<_FiguresSection> {
                     url: entry.value,
                     title: 'Page ${entry.key + 1}',
                     caption: '未检测到明确 Figure caption，显示 PDF 页面快照。',
+                    source: 'page_snapshot',
                   ),
                 )
                 .toList();
@@ -1159,6 +1167,7 @@ class _FiguresSectionState extends State<_FiguresSection> {
       separatorBuilder: (_, __) => const SizedBox(height: 14),
       itemBuilder: (context, index) {
         final item = imageItems[index];
+        final isSnapshot = item.source == 'page_snapshot';
         return Container(
           decoration: BoxDecoration(
             color: cs.surfaceContainerLowest,
@@ -1169,22 +1178,40 @@ class _FiguresSectionState extends State<_FiguresSection> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                item.title,
-                style: TextStyle(
-                  fontSize: 13,
-                  fontWeight: FontWeight.w700,
-                  color: cs.primary,
-                ),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      item.title,
+                      style: TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w700,
+                        color: cs.primary,
+                      ),
+                    ),
+                  ),
+                  _MetaChip(
+                    icon:
+                        isSnapshot
+                            ? Icons.article_outlined
+                            : Icons.image_search_rounded,
+                    label: isSnapshot ? '页面快照' : 'Figure 提取',
+                  ),
+                ],
               ),
               const SizedBox(height: 10),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: Container(
-                  width: double.infinity,
-                  constraints: const BoxConstraints(maxHeight: 520),
-                  color: cs.surfaceContainerHigh,
-                  child: Image.network(item.url, fit: BoxFit.contain),
+              _ZoomableImagePreview(
+                url: item.url,
+                title: item.title,
+                maxHeight: 520,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: Container(
+                    width: double.infinity,
+                    constraints: const BoxConstraints(maxHeight: 520),
+                    color: cs.surfaceContainerHigh,
+                    child: Image.network(item.url, fit: BoxFit.contain),
+                  ),
                 ),
               ),
               if (item.caption.isNotEmpty) ...[
@@ -1380,12 +1407,14 @@ class _TranslationSection extends StatelessWidget {
   final bool isTranslating;
   final Map<String, dynamic>? queueStatus;
   final VoidCallback onTranslate;
+  final VoidCallback onRetranslate;
 
   const _TranslationSection({
     required this.paper,
     required this.isTranslating,
     required this.queueStatus,
     required this.onTranslate,
+    required this.onRetranslate,
   });
 
   @override
@@ -1402,6 +1431,12 @@ class _TranslationSection extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _QueueStatusCard(kind: '翻译', status: queueStatus),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              onPressed: isTranslating ? null : onRetranslate,
+              icon: const Icon(Icons.refresh_rounded, size: 18),
+              label: const Text('重新翻译'),
+            ),
             const SizedBox(height: 12),
             if ((paper.translationModel ?? '').isNotEmpty ||
                 (paper.translationCreatedAt ?? '').isNotEmpty) ...[
@@ -1596,29 +1631,34 @@ class _MarkdownImage extends StatelessWidget {
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(10),
-            child: Container(
-              width: double.infinity,
-              constraints: const BoxConstraints(maxHeight: 360),
-              color: cs.surfaceContainerHigh,
-              child: Image.network(
-                imageUrl,
-                fit: BoxFit.contain,
-                errorBuilder:
-                    (_, __, ___) => _MarkdownImagePlaceholder(
-                      label: alt?.isNotEmpty == true ? alt! : '图片加载失败',
-                    ),
-                loadingBuilder: (context, child, progress) {
-                  if (progress == null) return child;
-                  return SizedBox(
-                    height: 180,
-                    child: Center(
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: cs.primary,
+            child: _ZoomableImagePreview(
+              url: imageUrl,
+              title: title?.isNotEmpty == true ? title! : alt ?? '图片',
+              maxHeight: 360,
+              child: Container(
+                width: double.infinity,
+                constraints: const BoxConstraints(maxHeight: 360),
+                color: cs.surfaceContainerHigh,
+                child: Image.network(
+                  imageUrl,
+                  fit: BoxFit.contain,
+                  errorBuilder:
+                      (_, __, ___) => _MarkdownImagePlaceholder(
+                        label: alt?.isNotEmpty == true ? alt! : '图片加载失败',
                       ),
-                    ),
-                  );
-                },
+                  loadingBuilder: (context, child, progress) {
+                    if (progress == null) return child;
+                    return SizedBox(
+                      height: 180,
+                      child: Center(
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: cs.primary,
+                        ),
+                      ),
+                    );
+                  },
+                ),
               ),
             ),
           ),
@@ -1631,6 +1671,101 @@ class _MarkdownImage extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+class _ZoomableImagePreview extends StatelessWidget {
+  final String url;
+  final String title;
+  final double maxHeight;
+  final Widget child;
+
+  const _ZoomableImagePreview({
+    required this.url,
+    required this.title,
+    required this.maxHeight,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        Material(
+          color: Colors.transparent,
+          child: InkWell(
+            onTap: () => _openZoomDialog(context),
+            child: child,
+          ),
+        ),
+        Positioned(
+          right: 8,
+          top: 8,
+          child: IconButton.filledTonal(
+            tooltip: '放大查看',
+            icon: const Icon(Icons.zoom_out_map_rounded, size: 18),
+            onPressed: () => _openZoomDialog(context),
+          ),
+        ),
+      ],
+    );
+  }
+
+  void _openZoomDialog(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    showDialog(
+      context: context,
+      builder:
+          (ctx) => Dialog.fullscreen(
+            backgroundColor: cs.surface,
+            child: SafeArea(
+              child: Column(
+                children: [
+                  SizedBox(
+                    height: 56,
+                    child: Row(
+                      children: [
+                        const SizedBox(width: 8),
+                        IconButton(
+                          tooltip: '关闭',
+                          icon: const Icon(Icons.close_rounded),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                        Expanded(
+                          child: Text(
+                            title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: InteractiveViewer(
+                      minScale: 0.5,
+                      maxScale: 6,
+                      child: Center(
+                        child: Image.network(
+                          url,
+                          fit: BoxFit.contain,
+                          errorBuilder:
+                              (_, __, ___) =>
+                                  const Text('图片加载失败，无法放大查看'),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
     );
   }
 }

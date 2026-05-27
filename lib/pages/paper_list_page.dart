@@ -30,6 +30,8 @@ class _PaperListPageState extends State<PaperListPage> {
   bool _loadingMore = false;
   bool _syncing = false;
   String? _error;
+  Map<String, dynamic>? _analysisQueueStatus;
+  Map<String, dynamic>? _translationQueueStatus;
 
   @override
   void initState() {
@@ -37,6 +39,7 @@ class _PaperListPageState extends State<PaperListPage> {
     _scrollController.addListener(_onScroll);
     _loadConferences();
     _loadPapers();
+    _loadQueueStatuses();
   }
 
   @override
@@ -111,7 +114,21 @@ class _PaperListPageState extends State<PaperListPage> {
   }
 
   Future<void> _refresh() async {
-    await Future.wait([_loadConferences(), _loadPapers()]);
+    await Future.wait([_loadConferences(), _loadPapers(), _loadQueueStatuses()]);
+  }
+
+  Future<void> _loadQueueStatuses() async {
+    try {
+      final results = await Future.wait([
+        _api.getAnalysisQueueStatus(),
+        _api.getTranslationQueueStatus(),
+      ]);
+      if (!mounted) return;
+      setState(() {
+        _analysisQueueStatus = results[0];
+        _translationQueueStatus = results[1];
+      });
+    } catch (_) {}
   }
 
   Future<void> _syncConference(String conf) async {
@@ -367,6 +384,22 @@ class _PaperListPageState extends State<PaperListPage> {
                         ),
                       ),
                   ],
+                ),
+              ),
+            ),
+
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: EdgeInsets.fromLTRB(
+                  horizontalPadding,
+                  6,
+                  horizontalPadding,
+                  10,
+                ),
+                child: _HomeQueuePanel(
+                  analysisStatus: _analysisQueueStatus,
+                  translationStatus: _translationQueueStatus,
+                  onRefresh: _loadQueueStatuses,
                 ),
               ),
             ),
@@ -766,6 +799,253 @@ class _PaperCard extends StatelessWidget {
                 ),
             ],
           ),
+        ),
+      ),
+    );
+  }
+}
+
+class _HomeQueuePanel extends StatelessWidget {
+  final Map<String, dynamic>? analysisStatus;
+  final Map<String, dynamic>? translationStatus;
+  final VoidCallback onRefresh;
+
+  const _HomeQueuePanel({
+    required this.analysisStatus,
+    required this.translationStatus,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final active =
+        _count(analysisStatus, 'running') +
+        _count(analysisStatus, 'queued') +
+        _count(translationStatus, 'running') +
+        _count(translationStatus, 'queued');
+    final failed =
+        _count(analysisStatus, 'failed') + _count(translationStatus, 'failed');
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerHigh.withOpacity(0.72),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: cs.outlineVariant.withOpacity(0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(Icons.dynamic_feed_rounded, size: 18, color: cs.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '后台队列',
+                  style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w800,
+                    color: cs.onSurface,
+                  ),
+                ),
+              ),
+              if (active > 0 || failed > 0)
+                _QueueBadge(
+                  label: active > 0 ? '$active 进行中' : '$failed 失败',
+                  color: active > 0 ? cs.primary : cs.error,
+                ),
+              IconButton(
+                tooltip: '刷新队列',
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.refresh_rounded, size: 18),
+                onPressed: onRefresh,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              Expanded(
+                child: _QueueMiniSummary(
+                  icon: Icons.auto_awesome_rounded,
+                  label: '解读',
+                  status: analysisStatus,
+                  color: Colors.amber.shade700,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: _QueueMiniSummary(
+                  icon: Icons.translate_rounded,
+                  label: '翻译',
+                  status: translationStatus,
+                  color: cs.tertiary,
+                ),
+              ),
+            ],
+          ),
+          ..._recentRows(context),
+        ],
+      ),
+    );
+  }
+
+  List<Widget> _recentRows(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final jobs = [
+      ..._jobs(analysisStatus, '解读'),
+      ..._jobs(translationStatus, '翻译'),
+    ].take(3).toList();
+    if (jobs.isEmpty) return const [];
+    return [
+      const SizedBox(height: 10),
+      for (final job in jobs)
+        Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Row(
+            children: [
+              Icon(_jobIcon(job.status), size: 14, color: cs.outline),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  '${job.kind}${_jobStatusText(job.status)} · ${job.title}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+                ),
+              ),
+            ],
+          ),
+        ),
+    ];
+  }
+
+  static int _count(Map<String, dynamic>? status, String key) {
+    final value = status?[key];
+    return value is int ? value : int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  static List<({String kind, String status, String title})> _jobs(
+    Map<String, dynamic>? status,
+    String kind,
+  ) {
+    final jobs = (status?['recent_jobs'] as List?) ?? const [];
+    return jobs.whereType<Map>().where((job) {
+      final s = job['status']?.toString() ?? '';
+      return s == 'running' || s == 'queued' || s == 'failed';
+    }).map((job) {
+      return (
+        kind: kind,
+        status: job['status']?.toString() ?? '',
+        title: (job['title'] ?? job['paper_id'] ?? '').toString(),
+      );
+    }).toList();
+  }
+
+  static IconData _jobIcon(String status) {
+    return switch (status) {
+      'running' => Icons.play_circle_outline_rounded,
+      'queued' => Icons.schedule_rounded,
+      'failed' => Icons.error_outline_rounded,
+      _ => Icons.circle_outlined,
+    };
+  }
+
+  static String _jobStatusText(String status) {
+    return switch (status) {
+      'running' => '运行中',
+      'queued' => '排队中',
+      'failed' => '失败',
+      _ => status,
+    };
+  }
+}
+
+class _QueueMiniSummary extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final Map<String, dynamic>? status;
+  final Color color;
+
+  const _QueueMiniSummary({
+    required this.icon,
+    required this.label,
+    required this.status,
+    required this.color,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final running = _count('running');
+    final queued = _count('queued');
+    final failed = _count('failed');
+    return Container(
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: cs.surfaceContainerLowest.withOpacity(0.8),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: cs.outlineVariant.withOpacity(0.25)),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 17, color: color),
+          const SizedBox(width: 7),
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: cs.onSurface,
+              ),
+            ),
+          ),
+          Text(
+            '$running/$queued/$failed',
+            style: TextStyle(
+              fontSize: 11,
+              fontWeight: FontWeight.w700,
+              color: cs.outline,
+              fontFamily: 'monospace',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  int _count(String key) {
+    final value = status?[key];
+    return value is int ? value : int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+}
+
+class _QueueBadge extends StatelessWidget {
+  final String label;
+  final Color color;
+
+  const _QueueBadge({required this.label, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.only(right: 4),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(color: color.withOpacity(0.28)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+          color: color,
         ),
       ),
     );
