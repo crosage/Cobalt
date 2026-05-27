@@ -32,6 +32,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
   final Set<String> _loadingIds = {};
   final Set<String> _analyzingIds = {};
   final Set<String> _translatingIds = {};
+  final Set<String> _pollingAnalysisIds = {};
   final Set<String> _pollingTranslationIds = {};
 
   @override
@@ -46,7 +47,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
   void dispose() => super.dispose();
 
   Future<void> _loadDetail(String paperId) async {
-    if (_detailCache.containsKey(paperId) || _loadingIds.contains(paperId)) {
+    if (_loadingIds.contains(paperId)) {
       return;
     }
     setState(() => _loadingIds.add(paperId));
@@ -55,6 +56,12 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
       setState(() {
         _detailCache[paperId] = detail;
         _loadingIds.remove(paperId);
+        if ((detail.analysis ?? '').trim().isNotEmpty) {
+          _analyzingIds.remove(paperId);
+        } else if (detail.analysisJobStatus == 'queued' ||
+            detail.analysisJobStatus == 'running') {
+          _analyzingIds.add(paperId);
+        }
         if ((detail.translation ?? '').trim().isNotEmpty) {
           _translatingIds.remove(paperId);
         } else if (detail.translationJobStatus == 'queued' ||
@@ -62,24 +69,45 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
           _translatingIds.add(paperId);
         }
       });
-      if ((detail.translation ?? '').trim().isEmpty) {
-        _queueTranslation(paperId, showSnackBar: false);
+      if (detail.analysisJobStatus == 'queued' ||
+          detail.analysisJobStatus == 'running') {
+        _pollAnalysis(paperId);
+      }
+      if (detail.translationJobStatus == 'queued' ||
+          detail.translationJobStatus == 'running') {
+        _pollTranslation(paperId);
       }
     } catch (e) {
       setState(() => _loadingIds.remove(paperId));
     }
   }
 
-  Future<void> _triggerAnalysis(String paperId) async {
+  Future<void> _triggerAnalysis(String paperId, {bool force = false}) async {
     if (_analyzingIds.contains(paperId)) return;
     setState(() => _analyzingIds.add(paperId));
     try {
-      await _api.analyzePaper(paperId);
-      final detail = await _api.getPaper(paperId);
-      setState(() {
-        _detailCache[paperId] = detail;
-        _analyzingIds.remove(paperId);
-      });
+      final result = await _api.queueAnalysis(paperId, force: force);
+      final status = result['status']?.toString() ?? 'queued';
+      if (status == 'cached') {
+        final detail = await _api.getPaper(paperId);
+        setState(() {
+          _detailCache[paperId] = detail;
+          _analyzingIds.remove(paperId);
+        });
+        return;
+      }
+      _pollAnalysis(paperId);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(status == 'running' ? '解读已在后台生成中' : '已加入解读队列'),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(12),
+            ),
+          ),
+        );
+      }
     } catch (e) {
       setState(() => _analyzingIds.remove(paperId));
       if (mounted) {
@@ -94,6 +122,62 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
         );
       }
     }
+  }
+
+  Future<void> _deleteAnalysis(String paperId) async {
+    try {
+      await _api.deleteAnalysis(paperId);
+      final detail = await _api.getPaper(paperId);
+      setState(() {
+        _detailCache[paperId] = detail;
+        _analyzingIds.remove(paperId);
+      });
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('删除解读失败: $e'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    }
+  }
+
+  Future<void> _pollAnalysis(String paperId) async {
+    if (_pollingAnalysisIds.contains(paperId)) return;
+    _pollingAnalysisIds.add(paperId);
+    for (var i = 0; i < 40; i++) {
+      await Future<void>.delayed(const Duration(seconds: 10));
+      if (!mounted || !_analyzingIds.contains(paperId)) break;
+      try {
+        final status = await _api.getAnalysisStatus(paperId);
+        if (status['cached'] == true) {
+          final detail = await _api.getPaper(paperId);
+          if (!mounted) break;
+          setState(() {
+            _detailCache[paperId] = detail;
+            _analyzingIds.remove(paperId);
+          });
+          break;
+        }
+        if (status['status'] == 'failed') {
+          if (!mounted) break;
+          setState(() => _analyzingIds.remove(paperId));
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: const Text('后台解读失败，可以重新生成'),
+              behavior: SnackBarBehavior.floating,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+          );
+          break;
+        }
+      } catch (_) {}
+    }
+    _pollingAnalysisIds.remove(paperId);
   }
 
   Future<void> _triggerTranslation(String paperId) async {
@@ -300,6 +384,8 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
         isAnalyzing: _analyzingIds.contains(paper.id),
         isTranslating: _translatingIds.contains(paper.id),
         onAnalyze: () => _triggerAnalysis(paper.id),
+        onReanalyze: () => _triggerAnalysis(paper.id, force: true),
+        onDeleteAnalysis: () => _deleteAnalysis(paper.id),
         onTranslate: () => _triggerTranslation(paper.id),
         onAddNote: (content) => _addNote(paper.id, content),
         onDeleteNote: (noteId) => _deleteNote(paper.id, noteId),
@@ -387,6 +473,8 @@ class _PaperView extends StatelessWidget {
   final bool isAnalyzing;
   final bool isTranslating;
   final VoidCallback onAnalyze;
+  final VoidCallback onReanalyze;
+  final VoidCallback onDeleteAnalysis;
   final VoidCallback onTranslate;
   final Future<void> Function(String content) onAddNote;
   final Future<void> Function(int noteId) onDeleteNote;
@@ -398,6 +486,8 @@ class _PaperView extends StatelessWidget {
     required this.isAnalyzing,
     required this.isTranslating,
     required this.onAnalyze,
+    required this.onReanalyze,
+    required this.onDeleteAnalysis,
     required this.onTranslate,
     required this.onAddNote,
     required this.onDeleteNote,
@@ -485,6 +575,8 @@ class _PaperView extends StatelessWidget {
                     paper: paper,
                     isAnalyzing: isAnalyzing,
                     onAnalyze: onAnalyze,
+                    onReanalyze: onReanalyze,
+                    onDeleteAnalysis: onDeleteAnalysis,
                   ),
                   if (paper.tokenCount != null && paper.tokenCount! > 0) ...[
                     const SizedBox(height: 16),
@@ -1091,11 +1183,15 @@ class _AnalysisSection extends StatelessWidget {
   final Paper paper;
   final bool isAnalyzing;
   final VoidCallback onAnalyze;
+  final VoidCallback onReanalyze;
+  final VoidCallback onDeleteAnalysis;
 
   const _AnalysisSection({
     required this.paper,
     required this.isAnalyzing,
     required this.onAnalyze,
+    required this.onReanalyze,
+    required this.onDeleteAnalysis,
   });
 
   @override
@@ -1109,7 +1205,29 @@ class _AnalysisSection extends StatelessWidget {
         icon: Icons.auto_awesome_rounded,
         title: '深度解读',
         color: Colors.amber.shade700,
-        child: _PaperMarkdownBody(data: paper.analysis!),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: isAnalyzing ? null : onReanalyze,
+                  icon: const Icon(Icons.refresh_rounded, size: 18),
+                  label: const Text('重新解读'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: isAnalyzing ? null : onDeleteAnalysis,
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                  label: const Text('删除解读'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _PaperMarkdownBody(data: paper.analysis!),
+          ],
+        ),
       );
     }
 
@@ -1137,7 +1255,7 @@ class _AnalysisSection extends StatelessWidget {
             ),
             const SizedBox(height: 16),
             Text(
-              '正在智能解读...',
+              paper.analysisJobStatus == 'queued' ? '解读排队中...' : '正在智能解读...',
               style: TextStyle(
                 fontSize: 15,
                 fontWeight: FontWeight.w600,
@@ -1146,7 +1264,7 @@ class _AnalysisSection extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              '下载 PDF → 提取章节 → LLM 分析',
+              '后台任务会持续运行，重新进入仍会显示当前状态',
               style: TextStyle(fontSize: 12, color: cs.outline),
               textAlign: TextAlign.center,
             ),

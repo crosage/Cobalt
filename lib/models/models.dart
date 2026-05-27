@@ -26,6 +26,7 @@ class Paper {
   String? translationModel;
   int? translationTokenCount;
   String? translationCreatedAt;
+  String? analysisJobStatus;
   String? translationJobStatus;
 
   Paper({
@@ -52,6 +53,7 @@ class Paper {
     this.translationModel,
     this.translationTokenCount,
     this.translationCreatedAt,
+    this.analysisJobStatus,
     this.translationJobStatus,
   });
 
@@ -80,6 +82,7 @@ class Paper {
       translationModel: json['translation_model'],
       translationTokenCount: json['translation_token_count'],
       translationCreatedAt: json['translation_created_at'],
+      analysisJobStatus: json['analysis_job_status'],
       translationJobStatus: json['translation_job_status'],
     );
   }

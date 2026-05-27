@@ -130,9 +130,33 @@ class ApiService {
 
   // ── 解读 ──
 
-  Future<String> analyzePaper(String paperId) async {
-    final resp = await _dio.post('/api/papers/$paperId/analyze');
+  Future<String> analyzePaper(String paperId, {bool force = false}) async {
+    final resp = await _dio.post(
+      '/api/papers/$paperId/analyze',
+      queryParameters: {'background': false, 'force': force},
+    );
     return _requireLlmText(resp.data, 'analysis');
+  }
+
+  Future<Map<String, dynamic>> queueAnalysis(
+    String paperId, {
+    bool force = false,
+  }) async {
+    final resp = await _dio.post(
+      '/api/papers/$paperId/analyze',
+      queryParameters: {'background': true, 'force': force},
+      options: Options(receiveTimeout: const Duration(seconds: 30)),
+    );
+    return (resp.data as Map).cast<String, dynamic>();
+  }
+
+  Future<Map<String, dynamic>> getAnalysisStatus(String paperId) async {
+    final resp = await _dio.get('/api/papers/$paperId/analyze/status');
+    return (resp.data as Map).cast<String, dynamic>();
+  }
+
+  Future<void> deleteAnalysis(String paperId) async {
+    await _dio.delete('/api/papers/$paperId/analyze');
   }
 
   Future<String> translatePaper(String paperId) async {
