@@ -146,6 +146,83 @@ class Conference {
   }
 }
 
+class ResearchPaper {
+  final String paperId;
+  final String title;
+  final List<String> authors;
+  final String venue;
+  final String year;
+  final String abstract;
+  final String snippet;
+  final String section;
+  final String retrievalSource;
+  final bool pdfAvailable;
+  final double? score;
+
+  ResearchPaper({
+    required this.paperId,
+    required this.title,
+    this.authors = const [],
+    this.venue = '',
+    this.year = '',
+    this.abstract = '',
+    this.snippet = '',
+    this.section = '',
+    this.retrievalSource = '',
+    this.pdfAvailable = false,
+    this.score,
+  });
+
+  factory ResearchPaper.fromJson(Map<String, dynamic> json) {
+    return ResearchPaper(
+      paperId: (json['paper_id'] ?? json['id'] ?? '').toString(),
+      title: (json['title'] ?? '').toString(),
+      authors: _parseAuthors(json['authors']),
+      venue: (json['venue'] ?? '').toString(),
+      year: (json['year'] ?? '').toString(),
+      abstract: (json['abstract'] ?? '').toString(),
+      snippet: (json['snippet'] ?? '').toString(),
+      section: (json['section'] ?? '').toString(),
+      retrievalSource: (json['retrieval_source'] ?? '').toString(),
+      pdfAvailable: json['pdf_available'] == true,
+      score:
+          json['score'] is num
+              ? (json['score'] as num).toDouble()
+              : double.tryParse(json['score']?.toString() ?? ''),
+    );
+  }
+
+  static List<String> _parseAuthors(dynamic value) {
+    if (value is! List) return const [];
+    return value
+        .map((item) {
+          if (item is String) return item;
+          if (item is Map) {
+            return (item['name'] ?? item['full_name'] ?? '').toString();
+          }
+          return item.toString();
+        })
+        .where((name) => name.trim().isNotEmpty)
+        .toList();
+  }
+
+  String get authorsShort {
+    if (authors.isEmpty) return '';
+    if (authors.length <= 3) return authors.join(', ');
+    return '${authors[0]} et al. (${authors.length})';
+  }
+
+  String get venueYear {
+    final parts = [venue, year].where((v) => v.trim().isNotEmpty).toList();
+    return parts.join(' ');
+  }
+
+  String get previewText {
+    final text = snippet.trim().isNotEmpty ? snippet : abstract;
+    return text.replaceAll(RegExp(r'\s+'), ' ').trim();
+  }
+}
+
 class Stats {
   final int totalPapers;
   final int read;

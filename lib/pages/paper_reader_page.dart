@@ -571,77 +571,109 @@ class _PaperView extends StatelessWidget {
 
     return DefaultTabController(
       length: 5,
-      child: Column(
-        children: [
-          _HeroSection(paper: paper),
-          Material(
-            color: cs.surface,
-            child: TabBar(
-              isScrollable: false,
-              labelPadding: EdgeInsets.zero,
-              tabs: const [
-                Tab(icon: Icon(Icons.article_rounded), text: '原文'),
-                Tab(icon: Icon(Icons.image_rounded), text: '插图'),
-                Tab(icon: Icon(Icons.translate_rounded), text: '翻译'),
-                Tab(icon: Icon(Icons.auto_awesome_rounded), text: '解读'),
-                Tab(icon: Icon(Icons.edit_note_rounded), text: '笔记'),
+      child: NestedScrollView(
+        physics: const BouncingScrollPhysics(),
+        headerSliverBuilder:
+            (context, innerBoxIsScrolled) => [
+              SliverToBoxAdapter(child: _HeroSection(paper: paper)),
+              SliverPersistentHeader(
+                pinned: true,
+                delegate: _TabBarHeaderDelegate(
+                  color: cs.surface,
+                  tabBar: const TabBar(
+                    isScrollable: false,
+                    labelPadding: EdgeInsets.zero,
+                    tabs: [
+                      Tab(icon: Icon(Icons.article_rounded), text: '原文'),
+                      Tab(icon: Icon(Icons.image_rounded), text: '插图'),
+                      Tab(icon: Icon(Icons.translate_rounded), text: '翻译'),
+                      Tab(icon: Icon(Icons.auto_awesome_rounded), text: '解读'),
+                      Tab(icon: Icon(Icons.edit_note_rounded), text: '笔记'),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+        body: TabBarView(
+          children: [
+            tabScroll([
+              _OriginalLinksBar(paper: paper),
+              const SizedBox(height: 18),
+              abstractWidget,
+            ]),
+            _FiguresSection(paperId: paper.id),
+            tabScroll([
+              _TranslationSection(
+                paper: paper,
+                isTranslating: isTranslating,
+                queueStatus: translationQueueStatus,
+                onTranslate: onTranslate,
+                onRetranslate: onRetranslate,
+              ),
+            ]),
+            tabScroll([
+              _AnalysisSection(
+                paper: paper,
+                isAnalyzing: isAnalyzing,
+                queueStatus: analysisQueueStatus,
+                onAnalyze: onAnalyze,
+                onReanalyze: onReanalyze,
+                onDeleteAnalysis: onDeleteAnalysis,
+              ),
+              if (paper.tokenCount != null && paper.tokenCount! > 0) ...[
+                const SizedBox(height: 16),
+                Center(
+                  child: _MetaChip(
+                    icon: Icons.memory_rounded,
+                    label: '${paper.llmModel ?? ""} · ${paper.tokenCount} tokens',
+                  ),
+                ),
               ],
-            ),
-          ),
-          Expanded(
-            child: TabBarView(
-              children: [
-                tabScroll([
-                  _OriginalLinksBar(paper: paper),
-                  const SizedBox(height: 18),
-                  abstractWidget,
-                ]),
-                _FiguresSection(paperId: paper.id),
-                tabScroll([
-                  _TranslationSection(
-                    paper: paper,
-                    isTranslating: isTranslating,
-                    queueStatus: translationQueueStatus,
-                    onTranslate: onTranslate,
-                    onRetranslate: onRetranslate,
-                  ),
-                ]),
-                tabScroll([
-                  _AnalysisSection(
-                    paper: paper,
-                    isAnalyzing: isAnalyzing,
-                    queueStatus: analysisQueueStatus,
-                    onAnalyze: onAnalyze,
-                    onReanalyze: onReanalyze,
-                    onDeleteAnalysis: onDeleteAnalysis,
-                  ),
-                  if (paper.tokenCount != null && paper.tokenCount! > 0) ...[
-                    const SizedBox(height: 16),
-                    Center(
-                      child: _MetaChip(
-                        icon: Icons.memory_rounded,
-                        label:
-                            '${paper.llmModel ?? ""} · ${paper.tokenCount} tokens',
-                      ),
-                    ),
-                  ],
-                ]),
-                tabScroll([
-                  _NotesSection(
-                    paper: paper,
-                    onAddNote: onAddNote,
-                    onDeleteNote: onDeleteNote,
-                  ),
-                ]),
-              ],
-            ),
-          ),
-        ],
+            ]),
+            tabScroll([
+              _NotesSection(
+                paper: paper,
+                onAddNote: onAddNote,
+                onDeleteNote: onDeleteNote,
+              ),
+            ]),
+          ],
+        ),
       ),
     );
   }
 }
 
+class _TabBarHeaderDelegate extends SliverPersistentHeaderDelegate {
+  final Color color;
+  final TabBar tabBar;
+
+  const _TabBarHeaderDelegate({required this.color, required this.tabBar});
+
+  @override
+  double get minExtent => tabBar.preferredSize.height;
+
+  @override
+  double get maxExtent => tabBar.preferredSize.height;
+
+  @override
+  Widget build(
+    BuildContext context,
+    double shrinkOffset,
+    bool overlapsContent,
+  ) {
+    return Material(
+      color: color,
+      elevation: overlapsContent ? 1 : 0,
+      child: tabBar,
+    );
+  }
+
+  @override
+  bool shouldRebuild(covariant _TabBarHeaderDelegate oldDelegate) {
+    return oldDelegate.color != color || oldDelegate.tabBar != tabBar;
+  }
+}
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 // Hero: 渐变头部 + 标题 + 作者 + 会议标签
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -1268,7 +1300,12 @@ class _AnalysisSection extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _QueueStatusCard(kind: '解读', status: queueStatus),
+            _QueueStatusCard(
+              kind: '解读',
+              status: queueStatus,
+              paperId: paper.id,
+              currentStatus: paper.analysisJobStatus,
+            ),
             const SizedBox(height: 12),
             Wrap(
               spacing: 8,
@@ -1307,7 +1344,12 @@ class _AnalysisSection extends StatelessWidget {
         ),
         child: Column(
           children: [
-            _QueueStatusCard(kind: '解读', status: queueStatus),
+            _QueueStatusCard(
+              kind: '解读',
+              status: queueStatus,
+              paperId: paper.id,
+              currentStatus: paper.analysisJobStatus,
+            ),
             const SizedBox(height: 16),
             SizedBox(
               width: 40,
@@ -1351,7 +1393,12 @@ class _AnalysisSection extends StatelessWidget {
       ),
       child: Column(
         children: [
-          _QueueStatusCard(kind: '解读', status: queueStatus),
+          _QueueStatusCard(
+            kind: '解读',
+            status: queueStatus,
+            paperId: paper.id,
+            currentStatus: paper.analysisJobStatus,
+          ),
           const SizedBox(height: 16),
           Container(
             padding: const EdgeInsets.all(16),
@@ -1430,7 +1477,12 @@ class _TranslationSection extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            _QueueStatusCard(kind: '翻译', status: queueStatus),
+            _QueueStatusCard(
+              kind: '翻译',
+              status: queueStatus,
+              paperId: paper.id,
+              currentStatus: paper.translationJobStatus,
+            ),
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: isTranslating ? null : onRetranslate,
@@ -1474,7 +1526,12 @@ class _TranslationSection extends StatelessWidget {
       ),
       child: Column(
         children: [
-          _QueueStatusCard(kind: '翻译', status: queueStatus),
+          _QueueStatusCard(
+            kind: '翻译',
+            status: queueStatus,
+            paperId: paper.id,
+            currentStatus: paper.translationJobStatus,
+          ),
           const SizedBox(height: 16),
           Icon(Icons.translate_rounded, size: 30, color: cs.tertiary),
           const SizedBox(height: 12),
@@ -1616,7 +1673,7 @@ class _MarkdownImage extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final rawUrl = uri.toString();
-    final imageUrl = ApiService().resolveUrl(rawUrl);
+    final imageUrl = ApiService().resolveReaderUrl(rawUrl);
 
     if (rawUrl.isEmpty) {
       return _MarkdownImagePlaceholder(
@@ -1837,26 +1894,48 @@ class _MetaChip extends StatelessWidget {
 class _QueueStatusCard extends StatelessWidget {
   final String kind;
   final Map<String, dynamic>? status;
+  final String? paperId;
+  final String? currentStatus;
 
-  const _QueueStatusCard({required this.kind, required this.status});
+  const _QueueStatusCard({
+    required this.kind,
+    required this.status,
+    this.paperId,
+    this.currentStatus,
+  });
 
   @override
   Widget build(BuildContext context) {
-    if (status == null) return const SizedBox.shrink();
+    final hasCurrentStatus = (currentStatus ?? '').trim().isNotEmpty;
+    if (status == null && !hasCurrentStatus) return const SizedBox.shrink();
     final cs = Theme.of(context).colorScheme;
-    final running = status!['running'] ?? 0;
-    final queued = status!['queued'] ?? 0;
-    final failed = status!['failed'] ?? 0;
-    final recentJobs = (status!['recent_jobs'] as List?) ?? const [];
+    final recentJobs = (status?['recent_jobs'] as List?) ?? const [];
     final visibleJobs =
         recentJobs
             .whereType<Map>()
             .where((job) {
               final s = job['status']?.toString() ?? '';
+              if (paperId != null && job['paper_id']?.toString() != paperId) {
+                return false;
+              }
               return s == 'running' || s == 'queued' || s == 'failed';
             })
             .take(3)
             .toList();
+    final state = hasCurrentStatus
+        ? currentStatus!.trim()
+        : visibleJobs.isNotEmpty
+            ? visibleJobs.first['status']?.toString() ?? ''
+            : '';
+    final scoped = paperId != null;
+    final running =
+        scoped ? (state == 'running' ? 1 : 0) : _count(status, 'running');
+    final queued = scoped ? (state == 'queued' ? 1 : 0) : _count(status, 'queued');
+    final failed = scoped ? (state == 'failed' ? 1 : 0) : _count(status, 'failed');
+
+    if (scoped && running == 0 && queued == 0 && failed == 0 && visibleJobs.isEmpty) {
+      return const SizedBox.shrink();
+    }
 
     return Container(
       width: double.infinity,
@@ -1894,6 +1973,11 @@ class _QueueStatusCard extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  static int _count(Map<String, dynamic>? status, String key) {
+    final value = status?[key];
+    return value is int ? value : int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
   static String _jobStatusText(String status) {

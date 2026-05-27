@@ -4,6 +4,8 @@ import '../models/models.dart';
 
 class ApiService {
   static const String defaultServerUrl = 'https://paper-api.zundamon.bond';
+  static const String _readerMount = '/reader';
+  static const String _readerApi = '$_readerMount/api';
 
   late Dio _dio;
   String _baseUrl = defaultServerUrl;
@@ -44,6 +46,22 @@ class ApiService {
     return '$_baseUrl/$trimmed';
   }
 
+  String resolveReaderUrl(String url) {
+    final trimmed = url.trim();
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      return trimmed;
+    }
+    if (trimmed.startsWith(_readerMount)) return resolveUrl(trimmed);
+    if (trimmed.startsWith('/api/')) return resolveUrl('$_readerMount$trimmed');
+    return resolveUrl(trimmed);
+  }
+
+  static String _readerPath(String path) {
+    if (path.startsWith('/api/')) return '$_readerMount$path';
+    if (path.startsWith('/')) return '$_readerApi$path';
+    return '$_readerApi/$path';
+  }
+
   Future<Stats> testServerUrl(String url) async {
     final normalized = _normalizeServerUrl(url);
     final dio = Dio(
@@ -54,7 +72,7 @@ class ApiService {
       ),
     );
     try {
-      final resp = await dio.get('/api/stats');
+      final resp = await dio.get(_readerPath('/api/stats'));
       return Stats.fromJson(resp.data);
     } on DioException catch (e) {
       throw Exception(_formatDioError(e));
@@ -84,13 +102,13 @@ class ApiService {
   // ── 会议 ──
 
   Future<List<Conference>> getConferences() async {
-    final resp = await _dio.get('/api/conferences');
+    final resp = await _dio.get(_readerPath('/api/conferences'));
     return (resp.data as List).map((e) => Conference.fromJson(e)).toList();
   }
 
   Future<int> syncConference(String conference, {bool force = false}) async {
     final resp = await _dio.post(
-      '/api/conferences/$conference/sync',
+      _readerPath('/api/conferences/$conference/sync'),
       queryParameters: {'force': force},
     );
     return resp.data['paper_count'] ?? 0;
@@ -106,7 +124,7 @@ class ApiService {
     int limit = 20,
   }) async {
     final resp = await _dio.get(
-      '/api/papers',
+      _readerPath('/api/papers'),
       queryParameters: {
         if (conference != null) 'conference': conference,
         if (keyword != null && keyword.isNotEmpty) 'keyword': keyword,
@@ -124,7 +142,7 @@ class ApiService {
   // ── 单篇详情 ──
 
   Future<Paper> getPaper(String paperId) async {
-    final resp = await _dio.get('/api/papers/$paperId');
+    final resp = await _dio.get(_readerPath('/api/papers/$paperId'));
     return Paper.fromJson(resp.data);
   }
 
@@ -132,7 +150,7 @@ class ApiService {
 
   Future<String> analyzePaper(String paperId, {bool force = false}) async {
     final resp = await _dio.post(
-      '/api/papers/$paperId/analyze',
+      _readerPath('/api/papers/$paperId/analyze'),
       queryParameters: {'background': false, 'force': force},
     );
     return _requireLlmText(resp.data, 'analysis');
@@ -143,7 +161,7 @@ class ApiService {
     bool force = false,
   }) async {
     final resp = await _dio.post(
-      '/api/papers/$paperId/analyze',
+      _readerPath('/api/papers/$paperId/analyze'),
       queryParameters: {'background': true, 'force': force},
       options: Options(receiveTimeout: const Duration(seconds: 30)),
     );
@@ -151,22 +169,24 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> getAnalysisStatus(String paperId) async {
-    final resp = await _dio.get('/api/papers/$paperId/analyze/status');
+    final resp = await _dio.get(
+      _readerPath('/api/papers/$paperId/analyze/status'),
+    );
     return (resp.data as Map).cast<String, dynamic>();
   }
 
   Future<Map<String, dynamic>> getAnalysisQueueStatus() async {
-    final resp = await _dio.get('/api/analyses/status');
+    final resp = await _dio.get(_readerPath('/api/analyses/status'));
     return (resp.data as Map).cast<String, dynamic>();
   }
 
   Future<void> deleteAnalysis(String paperId) async {
-    await _dio.delete('/api/papers/$paperId/analyze');
+    await _dio.delete(_readerPath('/api/papers/$paperId/analyze'));
   }
 
   Future<String> translatePaper(String paperId) async {
     final resp = await _dio.post(
-      '/api/papers/$paperId/translate',
+      _readerPath('/api/papers/$paperId/translate'),
       queryParameters: {'background': false},
     );
     return _requireLlmText(resp.data, 'translation');
@@ -177,7 +197,7 @@ class ApiService {
     bool force = false,
   }) async {
     final resp = await _dio.post(
-      '/api/papers/$paperId/translate',
+      _readerPath('/api/papers/$paperId/translate'),
       queryParameters: {'background': true, 'force': force},
       options: Options(receiveTimeout: const Duration(seconds: 30)),
     );
@@ -185,30 +205,32 @@ class ApiService {
   }
 
   Future<Map<String, dynamic>> getTranslationStatus(String paperId) async {
-    final resp = await _dio.get('/api/papers/$paperId/translate/status');
+    final resp = await _dio.get(
+      _readerPath('/api/papers/$paperId/translate/status'),
+    );
     return (resp.data as Map).cast<String, dynamic>();
   }
 
   Future<Map<String, dynamic>> getTranslationQueueStatus() async {
-    final resp = await _dio.get('/api/translations/status');
+    final resp = await _dio.get(_readerPath('/api/translations/status'));
     return (resp.data as Map).cast<String, dynamic>();
   }
 
   Future<Map<String, String>> getSections(String paperId) async {
-    final resp = await _dio.get('/api/papers/$paperId/sections');
+    final resp = await _dio.get(_readerPath('/api/papers/$paperId/sections'));
     return (resp.data['sections'] as Map?)?.cast<String, String>() ?? {};
   }
 
   Future<List<String>> getPageImageUrls(String paperId, {int limit = 8}) async {
     final resp = await _dio.get(
-      '/api/papers/$paperId/page-images',
+      _readerPath('/api/papers/$paperId/page-images'),
       queryParameters: {'limit': limit},
     );
     final images = (resp.data['images'] as List?) ?? [];
     return images
         .map((e) => (e as Map)['url']?.toString() ?? '')
         .where((url) => url.isNotEmpty)
-        .map(resolveUrl)
+        .map(resolveReaderUrl)
         .toList();
   }
 
@@ -217,14 +239,14 @@ class ApiService {
     int limit = 16,
   }) async {
     final resp = await _dio.get(
-      '/api/papers/$paperId/figures',
+      _readerPath('/api/papers/$paperId/figures'),
       queryParameters: {'limit': limit},
     );
     final figures = (resp.data['figures'] as List?) ?? [];
     return figures.map((e) {
       final item = (e as Map).cast<String, dynamic>();
       final url = item['url']?.toString() ?? '';
-      return {...item, 'url': url.isEmpty ? '' : resolveUrl(url)};
+      return {...item, 'url': url.isEmpty ? '' : resolveReaderUrl(url)};
     }).toList();
   }
 
@@ -236,7 +258,7 @@ class ApiService {
     double progress = 0.0,
   }) async {
     await _dio.put(
-      '/api/papers/$paperId/status',
+      _readerPath('/api/papers/$paperId/status'),
       data: {'status': status, 'progress': progress},
     );
   }
@@ -245,24 +267,52 @@ class ApiService {
 
   Future<Note> createNote(String paperId, String content) async {
     final resp = await _dio.post(
-      '/api/papers/$paperId/notes',
+      _readerPath('/api/papers/$paperId/notes'),
       data: {'content': content},
     );
     return Note(id: resp.data['id'], paperId: paperId, content: content);
   }
 
   Future<void> updateNote(int noteId, String content) async {
-    await _dio.put('/api/notes/$noteId', data: {'content': content});
+    await _dio.put(_readerPath('/api/notes/$noteId'), data: {'content': content});
   }
 
   Future<void> deleteNote(int noteId) async {
-    await _dio.delete('/api/notes/$noteId');
+    await _dio.delete(_readerPath('/api/notes/$noteId'));
+  }
+
+  // ── ResearchDB RAG / 混合搜索 ──
+
+  Future<List<ResearchPaper>> searchResearch(
+    String query, {
+    int limit = 8,
+  }) async {
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) return [];
+    final resp = await _dio.get(
+      '/api/search',
+      queryParameters: {
+        'query': trimmed,
+        'limit': limit,
+        'mode': 'hybrid',
+      },
+      options: Options(receiveTimeout: const Duration(seconds: 60)),
+    );
+    final items = (resp.data['items'] as List?) ?? const [];
+    return items
+        .whereType<Map>()
+        .map((e) => ResearchPaper.fromJson(e.cast<String, dynamic>()))
+        .toList();
+  }
+
+  String getResearchPdfUrl(String paperId) {
+    return resolveUrl('/api/papers/$paperId/pdf');
   }
 
   // ── 统计 ──
 
   Future<Stats> getStats() async {
-    final resp = await _dio.get('/api/stats');
+    final resp = await _dio.get(_readerPath('/api/stats'));
     return Stats.fromJson(resp.data);
   }
 }
