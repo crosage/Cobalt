@@ -26,6 +26,7 @@ class _PaperListPageState extends State<PaperListPage> {
 
   List<Paper> _papers = [];
   List<ResearchPaper> _researchResults = [];
+  final Set<String> _selectedPaperIds = {};
   List<Conference> _conferences = [];
   String? _selectedConference;
   String? _statusFilter;
@@ -98,6 +99,9 @@ class _PaperListPageState extends State<PaperListPage> {
         else
           _papers = result.papers;
         _total = result.total;
+        _selectedPaperIds.removeWhere(
+          (id) => !_papers.any((paper) => paper.id == id),
+        );
       });
     } catch (e) {
       setState(() => _error = e.toString());
@@ -219,6 +223,10 @@ class _PaperListPageState extends State<PaperListPage> {
   }
 
   void _openReader(int index) {
+    if (_selectedPaperIds.isNotEmpty) {
+      _toggleSelection(_papers[index].id);
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -234,6 +242,28 @@ class _PaperListPageState extends State<PaperListPage> {
     ).then((_) => _loadPapers());
   }
 
+  void _toggleSelection(String paperId) {
+    setState(() {
+      if (_selectedPaperIds.contains(paperId)) {
+        _selectedPaperIds.remove(paperId);
+      } else {
+        _selectedPaperIds.add(paperId);
+      }
+    });
+  }
+
+  void _selectAllLoaded() {
+    setState(() {
+      _selectedPaperIds
+        ..clear()
+        ..addAll(_papers.map((paper) => paper.id));
+    });
+  }
+
+  void _clearSelection() {
+    setState(_selectedPaperIds.clear);
+  }
+
   Future<void> _queueBatch(_BatchQueueAction action) async {
     if (_batchQueueing || _papers.isEmpty) return;
     final queueAnalysis =
@@ -241,8 +271,14 @@ class _PaperListPageState extends State<PaperListPage> {
     final queueTranslation =
         action == _BatchQueueAction.translation ||
         action == _BatchQueueAction.both;
+    final sourcePapers =
+        _selectedPaperIds.isEmpty
+            ? _papers
+            : _papers
+                .where((paper) => _selectedPaperIds.contains(paper.id))
+                .toList();
     final targets =
-        _papers.where((paper) {
+        sourcePapers.where((paper) {
           final needsAnalysis = queueAnalysis && !paper.hasAnalysis;
           final needsTranslation = queueTranslation && !paper.hasTranslation;
           return needsAnalysis || needsTranslation;
@@ -275,6 +311,7 @@ class _PaperListPageState extends State<PaperListPage> {
       _showBatchSnack(
         failed == 0 ? '已加入 $queued 个后台任务' : '已加入 $queued 个任务，$failed 篇失败',
       );
+      _clearSelection();
       await Future.wait([_loadQueueStatuses(), _loadPapers()]);
     } finally {
       if (mounted) setState(() => _batchQueueing = false);
@@ -316,51 +353,89 @@ class _PaperListPageState extends State<PaperListPage> {
               // 2. 将原本标题的位置换成搜索框
               title: SizedBox(
                 height: isCompact ? 40 : 44, // 限制搜索框高度
-                child: TextField(
-                  controller: _searchController,
-                  focusNode: _searchFocus,
-                  textAlignVertical: TextAlignVertical.center, // 内容垂直居中
-                  style: TextStyle(fontSize: isCompact ? 13 : 14), // 字体调小一点
-                  decoration: InputDecoration(
-                    hintText: '搜索标题或摘要...',
-                    hintStyle: TextStyle(
-                      color: cs.outline.withOpacity(0.5),
-                      fontSize: isCompact ? 13 : 14,
-                    ),
-                    prefixIcon: Icon(
-                      Icons.search_rounded,
-                      color: cs.outline,
-                      size: 20,
-                    ),
-                    suffixIcon:
-                        _searchController.text.isEmpty
-                            ? null
-                            : IconButton(
-                              tooltip: '清空搜索',
-                              icon: const Icon(Icons.close_rounded, size: 18),
-                              onPressed: () {
-                                _searchController.clear();
-                                _searchFocus.unfocus();
-                                _onSearchChanged('');
-                              },
+                child:
+                    _selectedPaperIds.isEmpty
+                        ? TextField(
+                          controller: _searchController,
+                          focusNode: _searchFocus,
+                          textAlignVertical: TextAlignVertical.center,
+                          style: TextStyle(fontSize: isCompact ? 13 : 14),
+                          decoration: InputDecoration(
+                            hintText: '搜索标题或摘要...',
+                            hintStyle: TextStyle(
+                              color: cs.outline.withOpacity(0.5),
+                              fontSize: isCompact ? 13 : 14,
                             ),
-                    fillColor: cs.surfaceContainerHighest.withOpacity(0.5),
-                    contentPadding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                    ), // 内部边距压缩
-                  ),
-                  onSubmitted: (_) {
-                    _loadPapers();
-                    _loadResearchResults();
-                  },
-                  onChanged: _onSearchChanged,
-                ),
+                            prefixIcon: Icon(
+                              Icons.search_rounded,
+                              color: cs.outline,
+                              size: 20,
+                            ),
+                            suffixIcon:
+                                _searchController.text.isEmpty
+                                    ? null
+                                    : IconButton(
+                                      tooltip: '清空搜索',
+                                      icon: const Icon(
+                                        Icons.close_rounded,
+                                        size: 18,
+                                      ),
+                                      onPressed: () {
+                                        _searchController.clear();
+                                        _searchFocus.unfocus();
+                                        _onSearchChanged('');
+                                      },
+                                    ),
+                            fillColor: cs.surfaceContainerHighest.withOpacity(0.5),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 12,
+                            ),
+                          ),
+                          onSubmitted: (_) {
+                            _loadPapers();
+                            _loadResearchResults();
+                          },
+                          onChanged: _onSearchChanged,
+                        )
+                        : Align(
+                          alignment: Alignment.centerLeft,
+                          child: Text(
+                            '已选 ${_selectedPaperIds.length} / ${_papers.length}',
+                            style: TextStyle(
+                              fontSize: isCompact ? 15 : 16,
+                              fontWeight: FontWeight.w800,
+                              color: cs.onSurface,
+                            ),
+                          ),
+                        ),
               ),
               centerTitle: false,
               titleSpacing: isCompact ? 12 : 16, // 控制搜索框左侧的间距
               actions: [
+                if (_selectedPaperIds.isNotEmpty) ...[
+                  IconButton(
+                    tooltip: '取消选择',
+                    icon: const Icon(Icons.close_rounded),
+                    onPressed: _clearSelection,
+                  ),
+                ],
+                IconButton(
+                  tooltip:
+                      _selectedPaperIds.length == _papers.length &&
+                              _papers.isNotEmpty
+                          ? '取消全选'
+                          : '选择当前列表',
+                  icon: const Icon(Icons.select_all_rounded),
+                  onPressed:
+                      _papers.isEmpty
+                          ? null
+                          : _selectedPaperIds.length == _papers.length
+                          ? _clearSelection
+                          : _selectAllLoaded,
+                ),
                 _BatchQueueButton(
                   busy: _batchQueueing,
+                  enabled: _papers.isNotEmpty,
                   onSelected: _queueBatch,
                 ),
                 // 同步按钮依然保留在最右侧
@@ -578,7 +653,10 @@ class _PaperListPageState extends State<PaperListPage> {
                     return _PaperCard(
                       paper: _papers[i],
                       index: i,
+                      selected: _selectedPaperIds.contains(_papers[i].id),
+                      selectionMode: _selectedPaperIds.isNotEmpty,
                       onTap: () => _openReader(i),
+                      onLongPress: () => _toggleSelection(_papers[i].id),
                     );
                   },
                 ),
@@ -774,9 +852,14 @@ class _ResearchResultTile extends StatelessWidget {
 
 class _BatchQueueButton extends StatelessWidget {
   final bool busy;
+  final bool enabled;
   final ValueChanged<_BatchQueueAction> onSelected;
 
-  const _BatchQueueButton({required this.busy, required this.onSelected});
+  const _BatchQueueButton({
+    required this.busy,
+    required this.enabled,
+    required this.onSelected,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -800,7 +883,7 @@ class _BatchQueueButton extends StatelessWidget {
     return PopupMenuButton<_BatchQueueAction>(
       tooltip: '批量加入队列',
       icon: Icon(Icons.playlist_add_rounded, color: cs.primary),
-      onSelected: onSelected,
+      onSelected: enabled ? onSelected : null,
       itemBuilder:
           (context) => const [
             PopupMenuItem(
@@ -999,12 +1082,18 @@ class _SyncButton extends StatelessWidget {
 class _PaperCard extends StatelessWidget {
   final Paper paper;
   final int index;
+  final bool selected;
+  final bool selectionMode;
   final VoidCallback onTap;
+  final VoidCallback onLongPress;
 
   const _PaperCard({
     required this.paper,
     required this.index,
+    required this.selected,
+    required this.selectionMode,
     required this.onTap,
+    required this.onLongPress,
   });
 
   @override
@@ -1021,16 +1110,31 @@ class _PaperCard extends StatelessWidget {
 
     return Card(
       margin: EdgeInsets.zero,
-      color: cs.surfaceContainerLowest,
+      color: selected ? cs.primaryContainer.withOpacity(0.35) : cs.surfaceContainerLowest,
       child: InkWell(
         onTap: () {
           HapticFeedback.selectionClick();
           onTap();
         },
+        onLongPress: () {
+          HapticFeedback.mediumImpact();
+          onLongPress();
+        },
         borderRadius: BorderRadius.circular(16),
         child: IntrinsicHeight(
           child: Row(
             children: [
+              if (selectionMode)
+                Padding(
+                  padding: const EdgeInsets.only(left: 10),
+                  child: Icon(
+                    selected
+                        ? Icons.check_circle_rounded
+                        : Icons.radio_button_unchecked_rounded,
+                    color: selected ? cs.primary : cs.outline,
+                    size: 22,
+                  ),
+                ),
               // 左侧色带
               Container(
                 width: 4,
