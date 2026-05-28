@@ -223,7 +223,7 @@ class ApiService {
 
   Future<List<Map<String, dynamic>>> getFigures(
     String paperId, {
-    int limit = 16,
+    int limit = 40,
   }) async {
     final resp = await _dio.get(
       _readerPath('/api/papers/$paperId/figures'),
