@@ -1095,7 +1095,6 @@ class _FiguresSectionState extends State<_FiguresSection> {
   bool _loading = true;
   String? _error;
   List<Map<String, dynamic>> _figures = [];
-  List<String> _pages = [];
 
   @override
   void initState() {
@@ -1109,14 +1108,10 @@ class _FiguresSectionState extends State<_FiguresSection> {
       _error = null;
     });
     try {
-      final results = await Future.wait([
-        _api.getFigures(widget.paperId),
-        _api.getPageImageUrls(widget.paperId, limit: 6),
-      ]);
+      final figures = await _api.getFigures(widget.paperId);
       if (!mounted) return;
       setState(() {
-        _figures = (results[0] as List).cast<Map<String, dynamic>>();
-        _pages = (results[1] as List).cast<String>();
+        _figures = figures;
         _loading = false;
       });
     } catch (e) {
@@ -1149,32 +1144,18 @@ class _FiguresSectionState extends State<_FiguresSection> {
       );
     }
 
-    final hasFigures = _figures.isNotEmpty;
     final imageItems =
-        hasFigures
-            ? _figures
-                .map(
-                  (fig) => (
-                    url: fig['url']?.toString() ?? '',
-                    title: fig['label']?.toString() ?? 'Figure',
-                    caption: fig['caption']?.toString() ?? '',
-                    source: fig['source']?.toString() ?? '',
-                  ),
-                )
-                .where((item) => item.url.isNotEmpty)
-                .toList()
-            : _pages
-                .asMap()
-                .entries
-                .map(
-                  (entry) => (
-                    url: entry.value,
-                    title: 'Page ${entry.key + 1}',
-                    caption: '未检测到明确 Figure caption，显示 PDF 页面快照。',
-                    source: 'page_snapshot',
-                  ),
-                )
-                .toList();
+        _figures
+            .map(
+              (fig) => (
+                url: fig['url']?.toString() ?? '',
+                title: fig['label']?.toString() ?? 'Figure',
+                caption: fig['caption']?.toString() ?? '',
+                source: fig['source']?.toString() ?? '',
+              ),
+            )
+            .where((item) => item.url.isNotEmpty)
+            .toList();
 
     if (imageItems.isEmpty) {
       return Padding(

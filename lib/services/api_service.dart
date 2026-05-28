@@ -221,19 +221,6 @@ class ApiService {
     return (resp.data['sections'] as Map?)?.cast<String, String>() ?? {};
   }
 
-  Future<List<String>> getPageImageUrls(String paperId, {int limit = 8}) async {
-    final resp = await _dio.get(
-      _readerPath('/api/papers/$paperId/page-images'),
-      queryParameters: {'limit': limit},
-    );
-    final images = (resp.data['images'] as List?) ?? [];
-    return images
-        .map((e) => (e as Map)['url']?.toString() ?? '')
-        .where((url) => url.isNotEmpty)
-        .map(resolveReaderUrl)
-        .toList();
-  }
-
   Future<List<Map<String, dynamic>>> getFigures(
     String paperId, {
     int limit = 16,
