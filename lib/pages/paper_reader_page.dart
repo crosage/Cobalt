@@ -702,7 +702,6 @@ class _HeroSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final isCompact = Responsive.isCompact(context);
-    final analysisFailed = paper.analysisJobStatus == 'failed';
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(color: cs.surfaceContainerLow),
@@ -1288,6 +1287,7 @@ class _AnalysisSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final isCompact = Responsive.isCompact(context);
+    final analysisFailed = paper.analysisJobStatus == 'failed';
 
     // 有解读内容
     if (paper.analysis != null && paper.analysis!.isNotEmpty) {
