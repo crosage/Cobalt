@@ -43,6 +43,9 @@ class _PaperListPageState extends State<PaperListPage> {
   Map<String, dynamic>? _analysisQueueStatus;
   Map<String, dynamic>? _translationQueueStatus;
 
+  List<Paper> get _currentPapers =>
+      _searchMode == _SearchMode.rag ? _ragPapers : _papers;
+
   @override
   void initState() {
     super.initState();
@@ -191,6 +194,9 @@ class _PaperListPageState extends State<PaperListPage> {
       if (!mounted || query != _searchController.text.trim()) return;
       setState(() {
         _ragPapers = papers;
+        _selectedPaperIds.removeWhere(
+          (id) => !papers.any((paper) => paper.id == id),
+        );
         _researchError =
             papers.isEmpty && results.isNotEmpty ? 'RAG 命中论文未进入阅读库' : null;
       });
@@ -282,6 +288,10 @@ class _PaperListPageState extends State<PaperListPage> {
   }
 
   void _openRagReader(int index) {
+    if (_selectedPaperIds.isNotEmpty) {
+      _toggleSelection(_ragPapers[index].id);
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -308,10 +318,11 @@ class _PaperListPageState extends State<PaperListPage> {
   }
 
   void _selectAllLoaded() {
+    final currentPapers = _currentPapers;
     setState(() {
       _selectedPaperIds
         ..clear()
-        ..addAll(_papers.map((paper) => paper.id));
+        ..addAll(currentPapers.map((paper) => paper.id));
     });
   }
 
@@ -320,7 +331,8 @@ class _PaperListPageState extends State<PaperListPage> {
   }
 
   Future<void> _queueBatch(_BatchQueueAction action) async {
-    if (_batchQueueing || _papers.isEmpty) return;
+    final currentPapers = _currentPapers;
+    if (_batchQueueing || currentPapers.isEmpty) return;
     final queueAnalysis =
         action == _BatchQueueAction.analysis || action == _BatchQueueAction.both;
     final queueTranslation =
@@ -328,8 +340,8 @@ class _PaperListPageState extends State<PaperListPage> {
         action == _BatchQueueAction.both;
     final sourcePapers =
         _selectedPaperIds.isEmpty
-            ? _papers
-            : _papers
+            ? currentPapers
+            : currentPapers
                 .where((paper) => _selectedPaperIds.contains(paper.id))
                 .toList();
     final targets =
@@ -367,7 +379,13 @@ class _PaperListPageState extends State<PaperListPage> {
         failed == 0 ? '已加入 $queued 个后台任务' : '已加入 $queued 个任务，$failed 篇失败',
       );
       _clearSelection();
-      await Future.wait([_loadQueueStatuses(), _loadPapers()]);
+      await Future.wait([
+        _loadQueueStatuses(),
+        if (_searchMode == _SearchMode.rag)
+          _loadResearchResults()
+        else
+          _loadPapers(),
+      ]);
     } finally {
       if (mounted) setState(() => _batchQueueing = false);
     }
@@ -391,6 +409,7 @@ class _PaperListPageState extends State<PaperListPage> {
     final horizontalPadding = Responsive.horizontalPadding(context);
     final isRagMode = _searchMode == _SearchMode.rag;
     final query = _searchController.text.trim();
+    final currentPapers = _currentPapers;
 
     return Scaffold(
       body: RefreshIndicator(
@@ -463,7 +482,7 @@ class _PaperListPageState extends State<PaperListPage> {
                         : Align(
                           alignment: Alignment.centerLeft,
                           child: Text(
-                            '已选 ${_selectedPaperIds.length} / ${_papers.length}',
+                            '已选 ${_selectedPaperIds.length} / ${currentPapers.length}',
                             style: TextStyle(
                               fontSize: isCompact ? 15 : 16,
                               fontWeight: FontWeight.w800,
@@ -484,21 +503,21 @@ class _PaperListPageState extends State<PaperListPage> {
                 ],
                 IconButton(
                   tooltip:
-                      _selectedPaperIds.length == _papers.length &&
-                              _papers.isNotEmpty
+                      _selectedPaperIds.length == currentPapers.length &&
+                              currentPapers.isNotEmpty
                           ? '取消全选'
                           : '选择当前列表',
                   icon: const Icon(Icons.select_all_rounded),
                   onPressed:
-                      isRagMode || _papers.isEmpty
+                      currentPapers.isEmpty
                           ? null
-                          : _selectedPaperIds.length == _papers.length
+                          : _selectedPaperIds.length == currentPapers.length
                           ? _clearSelection
                           : _selectAllLoaded,
                 ),
                 _BatchQueueButton(
                   busy: _batchQueueing,
-                  enabled: !isRagMode && _papers.isNotEmpty,
+                  enabled: currentPapers.isNotEmpty,
                   onSelected: _queueBatch,
                 ),
                 // 同步按钮依然保留在最右侧
@@ -706,10 +725,10 @@ class _PaperListPageState extends State<PaperListPage> {
                     return _PaperCard(
                       paper: _ragPapers[i],
                       index: i,
-                      selected: false,
-                      selectionMode: false,
+                      selected: _selectedPaperIds.contains(_ragPapers[i].id),
+                      selectionMode: _selectedPaperIds.isNotEmpty,
                       onTap: () => _openRagReader(i),
-                      onLongPress: () {},
+                      onLongPress: () => _toggleSelection(_ragPapers[i].id),
                     );
                   },
                 ),
