@@ -1581,7 +1581,7 @@ class _PaperMarkdownBody extends StatelessWidget {
     final cs = Theme.of(context).colorScheme;
 
     return MarkdownBody(
-      data: data,
+      data: _protectMathDelimiters(data),
       selectable: true,
       extensionSet: md.ExtensionSet.gitHubFlavored,
       fitContent: false,
@@ -1660,6 +1660,126 @@ class _PaperMarkdownBody extends StatelessWidget {
       ),
     );
   }
+}
+
+String _protectMathDelimiters(String input) {
+  final out = StringBuffer();
+  var i = 0;
+  while (i < input.length) {
+    if (_startsWith(input, i, '```')) {
+      final end = input.indexOf('```', i + 3);
+      if (end == -1) {
+        out.write(input.substring(i));
+        break;
+      }
+      out.write(input.substring(i, end + 3));
+      i = end + 3;
+      continue;
+    }
+
+    if (_startsWith(input, i, r'$$')) {
+      final end = input.indexOf(r'$$', i + 2);
+      if (end != -1) {
+        final math = input.substring(i + 2, end).trim();
+        if (math.isNotEmpty) {
+          out
+            ..write('\n\n```math\n')
+            ..write(r'$$')
+            ..write('\n')
+            ..write(_safeMathBlock(math))
+            ..write('\n')
+            ..write(r'$$')
+            ..write('\n```\n\n');
+          i = end + 2;
+          continue;
+        }
+      }
+    }
+
+    if (_startsWith(input, i, r'\[')) {
+      final end = input.indexOf(r'\]', i + 2);
+      if (end != -1) {
+        final math = input.substring(i + 2, end).trim();
+        if (math.isNotEmpty) {
+          out
+            ..write('\n\n```math\n')
+            ..write(r'\[')
+            ..write('\n')
+            ..write(_safeMathBlock(math))
+            ..write('\n')
+            ..write(r'\]')
+            ..write('\n```\n\n');
+          i = end + 2;
+          continue;
+        }
+      }
+    }
+
+    if (_startsWith(input, i, r'\(')) {
+      final end = input.indexOf(r'\)', i + 2);
+      if (end != -1) {
+        final math = input.substring(i + 2, end).trim();
+        if (math.isNotEmpty) {
+          final escapedMath = _safeInlineMath(math);
+          out.write('`\\($escapedMath\\)`');
+          i = end + 2;
+          continue;
+        }
+      }
+    }
+
+    if (input.codeUnitAt(i) == 36 &&
+        !_isEscaped(input, i) &&
+        !_startsWith(input, i, r'$$')) {
+      final end = _findInlineDollar(input, i + 1);
+      if (end != -1) {
+        final math = input.substring(i + 1, end).trim();
+        if (math.isNotEmpty) {
+          out.write('`\$${_safeInlineMath(math)}\$`');
+          i = end + 1;
+          continue;
+        }
+      }
+    }
+
+    out.writeCharCode(input.codeUnitAt(i));
+    i += 1;
+  }
+  return out.toString();
+}
+
+bool _startsWith(String input, int index, String pattern) {
+  return index + pattern.length <= input.length &&
+      input.substring(index, index + pattern.length) == pattern;
+}
+
+bool _isEscaped(String input, int index) {
+  var slashes = 0;
+  var i = index - 1;
+  while (i >= 0 && input.codeUnitAt(i) == 92) {
+    slashes += 1;
+    i -= 1;
+  }
+  return slashes.isOdd;
+}
+
+int _findInlineDollar(String input, int start) {
+  for (var i = start; i < input.length; i++) {
+    if (input.codeUnitAt(i) != 36 || _isEscaped(input, i)) continue;
+    if (_startsWith(input, i, r'$$')) continue;
+    final content = input.substring(start, i);
+    if (content.contains('\n')) return -1;
+    return i;
+  }
+  return -1;
+}
+
+String _safeInlineMath(String value) {
+  return value.replaceAll('`', '´');
+}
+
+String _safeMathBlock(String value) {
+  return value.replaceAll('```', "'''");
 }
 
 class _MarkdownImage extends StatelessWidget {
