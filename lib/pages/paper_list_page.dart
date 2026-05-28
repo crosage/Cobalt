@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../models/models.dart';
 import '../services/api_service.dart';
 import '../widgets/responsive.dart';
@@ -27,7 +26,7 @@ class _PaperListPageState extends State<PaperListPage> {
   Timer? _searchDebounce;
 
   List<Paper> _papers = [];
-  List<ResearchPaper> _researchResults = [];
+  List<Paper> _ragPapers = [];
   final Set<String> _selectedPaperIds = {};
   List<Conference> _conferences = [];
   String? _selectedConference;
@@ -155,7 +154,7 @@ class _PaperListPageState extends State<PaperListPage> {
       _searchMode = mode;
       _selectedPaperIds.clear();
       if (mode == _SearchMode.normal) {
-        _researchResults = [];
+        _ragPapers = [];
         _researchError = null;
         _researchLoading = false;
       }
@@ -171,7 +170,7 @@ class _PaperListPageState extends State<PaperListPage> {
     final query = _searchController.text.trim();
     if (query.isEmpty) {
       setState(() {
-        _researchResults = [];
+        _ragPapers = [];
         _researchError = null;
         _researchLoading = false;
       });
@@ -183,8 +182,18 @@ class _PaperListPageState extends State<PaperListPage> {
     });
     try {
       final results = await _api.searchResearch(query);
+      final papers = <Paper>[];
+      for (final result in results) {
+        try {
+          papers.add(await _api.getPaper(result.paperId));
+        } catch (_) {}
+      }
       if (!mounted || query != _searchController.text.trim()) return;
-      setState(() => _researchResults = results);
+      setState(() {
+        _ragPapers = papers;
+        _researchError =
+            papers.isEmpty && results.isNotEmpty ? 'RAG 命中论文未进入阅读库' : null;
+      });
     } catch (e) {
       if (!mounted) return;
       setState(() => _researchError = e.toString());
@@ -270,6 +279,22 @@ class _PaperListPageState extends State<PaperListPage> {
             ),
       ),
     ).then((_) => _loadPapers());
+  }
+
+  void _openRagReader(int index) {
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder:
+            (_) => PaperReaderPage(
+              papers: _ragPapers,
+              initialIndex: index,
+            ),
+      ),
+    ).then((_) {
+      _loadResearchResults();
+      _loadPapers();
+    });
   }
 
   void _toggleSelection(String paperId) {
@@ -465,7 +490,7 @@ class _PaperListPageState extends State<PaperListPage> {
                           : '选择当前列表',
                   icon: const Icon(Icons.select_all_rounded),
                   onPressed:
-                      _papers.isEmpty
+                      isRagMode || _papers.isEmpty
                           ? null
                           : _selectedPaperIds.length == _papers.length
                           ? _clearSelection
@@ -602,7 +627,7 @@ class _PaperListPageState extends State<PaperListPage> {
                         borderRadius: BorderRadius.circular(12),
                       ),
                       child: Text(
-                        isRagMode ? '${_researchResults.length} 条 RAG 结果' : '$_total 篇',
+                        isRagMode ? '${_ragPapers.length} 条 RAG 结果' : '$_total 篇',
                         style: TextStyle(
                           fontSize: 12,
                           fontWeight: FontWeight.w600,
@@ -613,7 +638,7 @@ class _PaperListPageState extends State<PaperListPage> {
                     ),
                     const Spacer(),
                     if ((!isRagMode && _loading && _papers.isNotEmpty) ||
-                        (isRagMode && _researchLoading && _researchResults.isNotEmpty))
+                        (isRagMode && _researchLoading && _ragPapers.isNotEmpty))
                       SizedBox(
                         width: 16,
                         height: 16,
@@ -627,26 +652,6 @@ class _PaperListPageState extends State<PaperListPage> {
               ),
             ),
 
-            if (isRagMode)
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    horizontalPadding,
-                    4,
-                    horizontalPadding,
-                    10,
-                  ),
-                  child: _ResearchSearchPanel(
-                    query: query,
-                    loading: _researchLoading,
-                    error: _researchError,
-                    results: _researchResults,
-                    onOpenPdf: _openResearchPdf,
-                    onRetry: _loadResearchResults,
-                  ),
-                ),
-              ),
-
             if (isRagMode && query.isEmpty)
               SliverFillRemaining(
                 child: _EmptyState(
@@ -655,7 +660,7 @@ class _PaperListPageState extends State<PaperListPage> {
                   subtitle: '会检索全文段落、摘要和向量索引',
                 ),
               )
-            else if (isRagMode && _researchLoading && _researchResults.isEmpty)
+            else if (isRagMode && _researchLoading && _ragPapers.isEmpty)
               const SliverFillRemaining(
                 child: Center(child: CircularProgressIndicator()),
               ),
@@ -678,9 +683,38 @@ class _PaperListPageState extends State<PaperListPage> {
               ),
 
             // ── 论文列表 ──
-            if (isRagMode)
-              const SliverToBoxAdapter(child: SizedBox.shrink())
-            else if (_error != null)
+            if (isRagMode && query.isNotEmpty && !_researchLoading && _ragPapers.isEmpty)
+              SliverFillRemaining(
+                child: _EmptyState(
+                  icon: Icons.manage_search_rounded,
+                  title: '暂无 RAG 结果',
+                  subtitle: _researchError ?? '换一个查询试试',
+                  action: TextButton.icon(
+                    onPressed: _loadResearchResults,
+                    icon: const Icon(Icons.refresh_rounded),
+                    label: const Text('重试'),
+                  ),
+                ),
+              )
+            else if (isRagMode && _ragPapers.isNotEmpty)
+              SliverPadding(
+                padding: EdgeInsets.symmetric(horizontal: isCompact ? 8 : 12),
+                sliver: SliverList.separated(
+                  itemCount: _ragPapers.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 4),
+                  itemBuilder: (ctx, i) {
+                    return _PaperCard(
+                      paper: _ragPapers[i],
+                      index: i,
+                      selected: false,
+                      selectionMode: false,
+                      onTap: () => _openRagReader(i),
+                      onLongPress: () {},
+                    );
+                  },
+                ),
+              )
+            else if (!isRagMode && _error != null)
               SliverFillRemaining(
                 child: _EmptyState(
                   icon: Icons.error_outline_rounded,
@@ -693,11 +727,11 @@ class _PaperListPageState extends State<PaperListPage> {
                   ),
                 ),
               )
-            else if (_loading && _papers.isEmpty)
+            else if (!isRagMode && _loading && _papers.isEmpty)
               const SliverFillRemaining(
                 child: Center(child: CircularProgressIndicator()),
               )
-            else if (_papers.isEmpty)
+            else if (!isRagMode && _papers.isEmpty)
               SliverFillRemaining(
                 child: _EmptyState(
                   icon: Icons.article_outlined,
@@ -705,7 +739,7 @@ class _PaperListPageState extends State<PaperListPage> {
                   subtitle: '点击右上角 ☁ 同步会议论文',
                 ),
               )
-            else
+            else if (!isRagMode)
               SliverPadding(
                 padding: EdgeInsets.symmetric(horizontal: isCompact ? 8 : 12),
                 sliver: SliverList.separated(
@@ -740,105 +774,6 @@ class _PaperListPageState extends State<PaperListPage> {
     );
   }
 
-  Future<void> _openResearchPdf(ResearchPaper paper) async {
-    if (!paper.pdfAvailable) return;
-    final uri = Uri.parse(_api.getResearchPdfUrl(paper.paperId));
-    await launchUrl(uri, mode: LaunchMode.externalApplication);
-  }
-}
-
-class _ResearchSearchPanel extends StatelessWidget {
-  final String query;
-  final bool loading;
-  final String? error;
-  final List<ResearchPaper> results;
-  final ValueChanged<ResearchPaper> onOpenPdf;
-  final VoidCallback onRetry;
-
-  const _ResearchSearchPanel({
-    required this.query,
-    required this.loading,
-    required this.error,
-    required this.results,
-    required this.onOpenPdf,
-    required this.onRetry,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerHigh.withOpacity(0.72),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: cs.outlineVariant.withOpacity(0.35)),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            children: [
-              Icon(Icons.hub_rounded, size: 18, color: cs.primary),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  'RAG 全文检索',
-                  style: TextStyle(
-                    fontSize: 13,
-                    fontWeight: FontWeight.w800,
-                    color: cs.onSurface,
-                  ),
-                ),
-              ),
-              if (loading)
-                SizedBox(
-                  width: 16,
-                  height: 16,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: cs.primary,
-                  ),
-                )
-              else
-                _QueueBadge(label: '${results.length} 条', color: cs.primary),
-            ],
-          ),
-          const SizedBox(height: 8),
-          if (error != null)
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    error!,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 12, color: cs.error),
-                  ),
-                ),
-                IconButton(
-                  tooltip: '重试检索',
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.refresh_rounded, size: 18),
-                  onPressed: onRetry,
-                ),
-              ],
-            )
-          else if (!loading && results.isEmpty)
-            Text(
-              '没有找到与 "$query" 相关的 RAG 结果',
-              style: TextStyle(fontSize: 12, color: cs.outline),
-            )
-          else
-            for (final paper in results) ...[
-              const SizedBox(height: 8),
-              _ResearchResultTile(paper: paper, onOpenPdf: onOpenPdf),
-            ],
-        ],
-      ),
-    );
-  }
 }
 
 class _SearchModeBar extends StatelessWidget {
@@ -872,143 +807,6 @@ class _SearchModeBar extends StatelessWidget {
         ),
       ),
       onSelectionChanged: (values) => onChanged(values.first),
-    );
-  }
-}
-
-class _ResearchResultTile extends StatelessWidget {
-  final ResearchPaper paper;
-  final ValueChanged<ResearchPaper> onOpenPdf;
-
-  const _ResearchResultTile({required this.paper, required this.onOpenPdf});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerLowest,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: cs.outlineVariant.withOpacity(0.25)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  paper.title,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 13,
-                    height: 1.35,
-                    fontWeight: FontWeight.w700,
-                    color: cs.onSurface,
-                  ),
-                ),
-                if (paper.venueYear.isNotEmpty || paper.authorsShort.isNotEmpty) ...[
-                  const SizedBox(height: 4),
-                  Text(
-                    [
-                      if (paper.venueYear.isNotEmpty) paper.venueYear,
-                      if (paper.authorsShort.isNotEmpty) paper.authorsShort,
-                    ].join(' · '),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 11, color: cs.outline),
-                  ),
-                ],
-                const SizedBox(height: 6),
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 4,
-                  children: [
-                    if (paper.section.isNotEmpty)
-                      _ResultBadge(
-                        icon: Icons.subject_rounded,
-                        label: paper.section,
-                      ),
-                    if (paper.retrievalSource.isNotEmpty)
-                      _ResultBadge(
-                        icon: Icons.travel_explore_rounded,
-                        label: paper.retrievalSource,
-                      ),
-                    if (paper.score != null)
-                      _ResultBadge(
-                        icon: Icons.speed_rounded,
-                        label: paper.score!.toStringAsFixed(3),
-                      ),
-                  ],
-                ),
-                if (paper.previewText.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  Text(
-                    paper.previewText,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 12,
-                      height: 1.45,
-                      color: cs.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          IconButton.filledTonal(
-            tooltip: paper.pdfAvailable ? '打开 PDF' : '暂无 PDF',
-            visualDensity: VisualDensity.compact,
-            icon: const Icon(Icons.picture_as_pdf_rounded, size: 18),
-            onPressed: paper.pdfAvailable ? () => onOpenPdf(paper) : null,
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ResultBadge extends StatelessWidget {
-  final IconData icon;
-  final String label;
-
-  const _ResultBadge({required this.icon, required this.label});
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-      decoration: BoxDecoration(
-        color: cs.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: cs.outlineVariant.withOpacity(0.25)),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 12, color: cs.outline),
-          const SizedBox(width: 4),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 160),
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight: FontWeight.w600,
-                color: cs.onSurfaceVariant,
-              ),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
