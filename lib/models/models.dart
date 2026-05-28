@@ -223,6 +223,60 @@ class ResearchPaper {
   }
 }
 
+class LlmJob {
+  final String paperId;
+  final String jobType;
+  final String status;
+  final String error;
+  final bool force;
+  final String createdAt;
+  final String updatedAt;
+  final String startedAt;
+  final String finishedAt;
+  final String title;
+  final String conference;
+  final int? queuePosition;
+
+  LlmJob({
+    required this.paperId,
+    required this.jobType,
+    required this.status,
+    this.error = '',
+    this.force = false,
+    this.createdAt = '',
+    this.updatedAt = '',
+    this.startedAt = '',
+    this.finishedAt = '',
+    this.title = '',
+    this.conference = '',
+    this.queuePosition,
+  });
+
+  factory LlmJob.fromJson(Map<String, dynamic> json) {
+    return LlmJob(
+      paperId: (json['paper_id'] ?? '').toString(),
+      jobType: (json['job_type'] ?? '').toString(),
+      status: (json['status'] ?? '').toString(),
+      error: (json['error'] ?? '').toString(),
+      force: json['force'] == true || json['force'] == 1,
+      createdAt: (json['created_at'] ?? '').toString(),
+      updatedAt: (json['updated_at'] ?? '').toString(),
+      startedAt: (json['started_at'] ?? '').toString(),
+      finishedAt: (json['finished_at'] ?? '').toString(),
+      title: (json['title'] ?? '').toString(),
+      conference: (json['conference'] ?? '').toString(),
+      queuePosition:
+          json['queue_position'] is int
+              ? json['queue_position'] as int
+              : int.tryParse(json['queue_position']?.toString() ?? ''),
+    );
+  }
+
+  String get kindLabel => jobType == 'translation' ? '翻译' : '解读';
+  bool get isFailed => status == 'failed';
+  bool get isActive => status == 'queued' || status == 'running';
+}
+
 class Stats {
   final int totalPapers;
   final int read;

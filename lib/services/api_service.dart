@@ -216,6 +216,42 @@ class ApiService {
     return (resp.data as Map).cast<String, dynamic>();
   }
 
+  Future<Map<String, dynamic>> getTranslationChunks(String paperId) async {
+    final resp = await _dio.get(
+      _readerPath('/api/papers/$paperId/translate/chunks'),
+    );
+    return (resp.data as Map).cast<String, dynamic>();
+  }
+
+  Future<void> deleteTranslation(String paperId) async {
+    await _dio.delete(_readerPath('/api/papers/$paperId/translate'));
+  }
+
+  Future<({List<LlmJob> jobs, Map<String, dynamic> raw})> getLlmJobs({
+    String status = 'active',
+    int limit = 100,
+  }) async {
+    final resp = await _dio.get(
+      _readerPath('/api/llm-jobs'),
+      queryParameters: {'status': status, 'limit': limit},
+    );
+    final data = (resp.data as Map).cast<String, dynamic>();
+    final jobs =
+        ((data['jobs'] as List?) ?? const [])
+            .whereType<Map>()
+            .map((e) => LlmJob.fromJson(e.cast<String, dynamic>()))
+            .toList();
+    return (jobs: jobs, raw: data);
+  }
+
+  Future<void> retryLlmJob(String jobType, String paperId) async {
+    await _dio.post(_readerPath('/api/llm-jobs/$jobType/$paperId/retry'));
+  }
+
+  Future<void> deleteLlmJob(String jobType, String paperId) async {
+    await _dio.delete(_readerPath('/api/llm-jobs/$jobType/$paperId'));
+  }
+
   Future<Map<String, String>> getSections(String paperId) async {
     final resp = await _dio.get(_readerPath('/api/papers/$paperId/sections'));
     return (resp.data['sections'] as Map?)?.cast<String, String>() ?? {};

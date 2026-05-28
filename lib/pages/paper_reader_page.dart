@@ -36,6 +36,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
   final Set<String> _pollingTranslationIds = {};
   Map<String, dynamic>? _analysisQueueStatus;
   Map<String, dynamic>? _translationQueueStatus;
+  final Map<String, Map<String, dynamic>> _translationChunkStatus = {};
 
   @override
   void initState() {
@@ -77,7 +78,9 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
         _pollAnalysis(paperId);
       }
       if (detail.translationJobStatus == 'queued' ||
-          detail.translationJobStatus == 'running') {
+          detail.translationJobStatus == 'running' ||
+          detail.translationJobStatus == 'failed') {
+        _loadTranslationChunks(paperId);
         _pollTranslation(paperId);
       }
     } catch (e) {
@@ -204,6 +207,14 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
     } catch (_) {}
   }
 
+  Future<void> _loadTranslationChunks(String paperId) async {
+    try {
+      final chunks = await _api.getTranslationChunks(paperId);
+      if (!mounted) return;
+      setState(() => _translationChunkStatus[paperId] = chunks);
+    } catch (_) {}
+  }
+
   Future<void> _queueTranslation(
     String paperId, {
     bool force = false,
@@ -259,6 +270,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
       if (!mounted || !_translatingIds.contains(paperId)) break;
       try {
         final status = await _api.getTranslationStatus(paperId);
+        await _loadTranslationChunks(paperId);
         await _loadQueueStatuses();
         if (status['cached'] == true) {
           final detail = await _api.getPaper(paperId);
@@ -409,6 +421,7 @@ class _PaperReaderPageState extends State<PaperReaderPage> {
         isTranslating: _translatingIds.contains(paper.id),
         analysisQueueStatus: _analysisQueueStatus,
         translationQueueStatus: _translationQueueStatus,
+        translationChunkStatus: _translationChunkStatus[paper.id],
         onAnalyze: () => _triggerAnalysis(paper.id),
         onReanalyze: () => _triggerAnalysis(paper.id, force: true),
         onDeleteAnalysis: () => _deleteAnalysis(paper.id),
@@ -501,6 +514,7 @@ class _PaperView extends StatelessWidget {
   final bool isTranslating;
   final Map<String, dynamic>? analysisQueueStatus;
   final Map<String, dynamic>? translationQueueStatus;
+  final Map<String, dynamic>? translationChunkStatus;
   final VoidCallback onAnalyze;
   final VoidCallback onReanalyze;
   final VoidCallback onDeleteAnalysis;
@@ -517,6 +531,7 @@ class _PaperView extends StatelessWidget {
     required this.isTranslating,
     required this.analysisQueueStatus,
     required this.translationQueueStatus,
+    required this.translationChunkStatus,
     required this.onAnalyze,
     required this.onReanalyze,
     required this.onDeleteAnalysis,
@@ -607,6 +622,7 @@ class _PaperView extends StatelessWidget {
                 paper: paper,
                 isTranslating: isTranslating,
                 queueStatus: translationQueueStatus,
+                chunkStatus: translationChunkStatus,
                 onTranslate: onTranslate,
                 onRetranslate: onRetranslate,
               ),
@@ -686,6 +702,7 @@ class _HeroSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final isCompact = Responsive.isCompact(context);
+    final analysisFailed = paper.analysisJobStatus == 'failed';
     return Container(
       width: double.infinity,
       decoration: BoxDecoration(color: cs.surfaceContainerLow),
@@ -1395,7 +1412,7 @@ class _AnalysisSection extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            '获取 AI 深度解读',
+            analysisFailed ? '解读失败' : '获取 AI 深度解读',
             style: TextStyle(
               fontSize: 16,
               fontWeight: FontWeight.w700,
@@ -1404,21 +1421,37 @@ class _AnalysisSection extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            '智能提取关键章节，节省 60%+ token',
-            style: TextStyle(fontSize: 12, color: cs.outline),
+            analysisFailed ? '可以删除失败任务或重新生成' : '智能提取关键章节，节省 60%+ token',
+            style: TextStyle(
+              fontSize: 12,
+              color: analysisFailed ? cs.error : cs.outline,
+            ),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 20),
-          FilledButton.icon(
-            onPressed: onAnalyze,
-            icon: const Icon(Icons.auto_awesome_rounded, size: 18),
-            label: const Text('生成解读'),
-            style: FilledButton.styleFrom(
-              padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            alignment: WrapAlignment.center,
+            children: [
+              FilledButton.icon(
+                onPressed: analysisFailed ? onReanalyze : onAnalyze,
+                icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+                label: Text(analysisFailed ? '重新生成' : '生成解读'),
+                style: FilledButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 14),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
               ),
-            ),
+              if (analysisFailed)
+                OutlinedButton.icon(
+                  onPressed: onDeleteAnalysis,
+                  icon: const Icon(Icons.delete_outline_rounded, size: 18),
+                  label: const Text('删除失败任务'),
+                ),
+            ],
           ),
         ],
       ),
@@ -1434,6 +1467,7 @@ class _TranslationSection extends StatelessWidget {
   final Paper paper;
   final bool isTranslating;
   final Map<String, dynamic>? queueStatus;
+  final Map<String, dynamic>? chunkStatus;
   final VoidCallback onTranslate;
   final VoidCallback onRetranslate;
 
@@ -1441,6 +1475,7 @@ class _TranslationSection extends StatelessWidget {
     required this.paper,
     required this.isTranslating,
     required this.queueStatus,
+    required this.chunkStatus,
     required this.onTranslate,
     required this.onRetranslate,
   });
@@ -1449,6 +1484,7 @@ class _TranslationSection extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
     final translation = paper.translation?.trim() ?? '';
+    final translationFailed = paper.translationJobStatus == 'failed';
 
     if (translation.isNotEmpty) {
       return _SectionCard(
@@ -1464,6 +1500,7 @@ class _TranslationSection extends StatelessWidget {
               paperId: paper.id,
               currentStatus: paper.translationJobStatus,
             ),
+            _TranslationProgressCard(status: chunkStatus),
             const SizedBox(height: 12),
             OutlinedButton.icon(
               onPressed: isTranslating ? null : onRetranslate,
@@ -1513,11 +1550,16 @@ class _TranslationSection extends StatelessWidget {
             paperId: paper.id,
             currentStatus: paper.translationJobStatus,
           ),
+          _TranslationProgressCard(status: chunkStatus),
           const SizedBox(height: 16),
           Icon(Icons.translate_rounded, size: 30, color: cs.tertiary),
           const SizedBox(height: 12),
           Text(
-            isTranslating ? '后台翻译中' : '生成全文翻译',
+            translationFailed
+                ? '翻译失败'
+                : isTranslating
+                    ? '后台翻译中'
+                    : '生成全文翻译',
             style: TextStyle(
               fontSize: 15,
               fontWeight: FontWeight.w700,
@@ -1526,13 +1568,24 @@ class _TranslationSection extends StatelessWidget {
           ),
           const SizedBox(height: 4),
           Text(
-            isTranslating ? '可以继续阅读，完成后会自动缓存' : '按章节保留公式、引用和技术术语',
-            style: TextStyle(fontSize: 12, color: cs.outline),
+            translationFailed
+                ? '可以查看失败分块，或重新翻译'
+                : isTranslating
+                    ? '可以继续阅读，完成后会自动缓存'
+                    : '按章节保留公式、引用和技术术语',
+            style: TextStyle(
+              fontSize: 12,
+              color: translationFailed ? cs.error : cs.outline,
+            ),
             textAlign: TextAlign.center,
           ),
           const SizedBox(height: 18),
           FilledButton.icon(
-            onPressed: isTranslating ? null : onTranslate,
+            onPressed: isTranslating
+                ? null
+                : translationFailed
+                    ? onRetranslate
+                    : onTranslate,
             icon:
                 isTranslating
                     ? SizedBox(
@@ -1544,11 +1597,109 @@ class _TranslationSection extends StatelessWidget {
                       ),
                     )
                     : const Icon(Icons.translate_rounded, size: 18),
-            label: Text(isTranslating ? '翻译中' : '开始翻译'),
+            label: Text(
+              isTranslating
+                  ? '翻译中'
+                  : translationFailed
+                      ? '重新翻译'
+                      : '开始翻译',
+            ),
           ),
         ],
       ),
     );
+  }
+}
+
+class _TranslationProgressCard extends StatelessWidget {
+  final Map<String, dynamic>? status;
+
+  const _TranslationProgressCard({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    if (status == null) return const SizedBox.shrink();
+    final total = _asInt(status!['total']);
+    final done = _asInt(status!['done']);
+    final running = status!['running'];
+    final failed = (status!['failed'] as List?) ?? const [];
+    if (total <= 0 && failed.isEmpty) return const SizedBox.shrink();
+
+    final cs = Theme.of(context).colorScheme;
+    final runningLabel =
+        running is Map
+            ? (running['source_label']?.toString() ?? '').trim()
+            : '';
+    final progress = total > 0 ? done / total : null;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 10),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: cs.surfaceContainerHighest.withOpacity(0.48),
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: cs.outlineVariant.withOpacity(0.24)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.segment_rounded, size: 16, color: cs.tertiary),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    total > 0 ? '翻译进度 $done / $total' : '翻译分块状态',
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w800,
+                      color: cs.onSurface,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            if (progress != null) ...[
+              const SizedBox(height: 8),
+              LinearProgressIndicator(value: progress.clamp(0.0, 1.0)),
+            ],
+            if (runningLabel.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                '当前章节：$runningLabel',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+              ),
+            ],
+            if (failed.isNotEmpty) ...[
+              const SizedBox(height: 8),
+              Text(
+                '失败 ${failed.length} 段：${_failedText(failed.first)}',
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(fontSize: 12, height: 1.4, color: cs.error),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  static int _asInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
+  }
+
+  static String _failedText(dynamic value) {
+    if (value is! Map) return '';
+    final label = value['source_label']?.toString() ?? '';
+    final error = value['error']?.toString() ?? '';
+    return [label, error].where((v) => v.trim().isNotEmpty).join(' · ');
   }
 }
 
@@ -2037,6 +2188,11 @@ class _QueueStatusCard extends StatelessWidget {
     if (scoped && running == 0 && queued == 0 && failed == 0 && visibleJobs.isEmpty) {
       return const SizedBox.shrink();
     }
+    final currentJob =
+        visibleJobs.isNotEmpty
+            ? visibleJobs.first
+            : const <String, dynamic>{};
+    final error = currentJob['error']?.toString().trim() ?? '';
 
     return Container(
       width: double.infinity,
@@ -2070,6 +2226,15 @@ class _QueueStatusCard extends StatelessWidget {
                   style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
                 ),
               ),
+          ],
+          if (error.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Text(
+              error,
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 12, height: 1.4, color: cs.error),
+            ),
           ],
         ],
       ),
