@@ -243,11 +243,56 @@ class ApiService {
       queryParameters: {'limit': limit},
     );
     final figures = (resp.data['figures'] as List?) ?? [];
-    return figures.map((e) {
+    final items = figures.map((e) {
       final item = (e as Map).cast<String, dynamic>();
       final url = item['url']?.toString() ?? '';
       return {...item, 'url': url.isEmpty ? '' : resolveReaderUrl(url)};
     }).toList();
+    items.sort(_compareFigures);
+    return items;
+  }
+
+  int _compareFigures(Map<String, dynamic> a, Map<String, dynamic> b) {
+    final aNumber = a['number']?.toString() ?? a['label']?.toString() ?? '';
+    final bNumber = b['number']?.toString() ?? b['label']?.toString() ?? '';
+    final numberCompare = _naturalCompare(aNumber, bNumber);
+    if (numberCompare != 0) return numberCompare;
+    return _asInt(a['page']).compareTo(_asInt(b['page']));
+  }
+
+  int _naturalCompare(String a, String b) {
+    final aParts = _naturalParts(a);
+    final bParts = _naturalParts(b);
+    final length =
+        aParts.length < bParts.length ? aParts.length : bParts.length;
+    for (var i = 0; i < length; i++) {
+      final left = aParts[i];
+      final right = bParts[i];
+      if (left is int && right is int) {
+        final compared = left.compareTo(right);
+        if (compared != 0) return compared;
+      } else {
+        final compared = left.toString().compareTo(right.toString());
+        if (compared != 0) return compared;
+      }
+    }
+    return aParts.length.compareTo(bParts.length);
+  }
+
+  List<Object> _naturalParts(String value) {
+    final matches = RegExp(r'\d+|\D+').allMatches(value.toLowerCase().trim());
+    return matches
+        .map((match) {
+          final part = match.group(0) ?? '';
+          return int.tryParse(part) ?? part;
+        })
+        .toList();
+  }
+
+  int _asInt(dynamic value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    return int.tryParse(value?.toString() ?? '') ?? 0;
   }
 
   // ── 阅读状态 ──
