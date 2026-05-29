@@ -353,7 +353,7 @@ class ApiService {
 
   Future<List<ResearchPaper>> searchResearch(
     String query, {
-    int limit = 8,
+    int limit = 30,
   }) async {
     final trimmed = query.trim();
     if (trimmed.isEmpty) return [];

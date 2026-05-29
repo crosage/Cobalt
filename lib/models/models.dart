@@ -58,6 +58,8 @@ class Paper {
   });
 
   factory Paper.fromJson(Map<String, dynamic> json) {
+    final analysisText = (json['analysis'] ?? '').toString();
+    final translationText = (json['translation'] ?? '').toString();
     return Paper(
       id: json['id'] ?? '',
       conference: json['conference'] ?? '',
@@ -71,10 +73,11 @@ class Paper {
       readStatus: json['read_status'] ?? 'unread',
       progress: (json['progress'] ?? 0.0).toDouble(),
       noteCount: json['note_count'] ?? 0,
-      hasAnalysis: json['has_analysis'] ?? false,
-      hasTranslation: json['has_translation'] ?? false,
-      analysis: json['analysis'],
-      translation: json['translation'],
+      hasAnalysis: json['has_analysis'] ?? analysisText.trim().isNotEmpty,
+      hasTranslation:
+          json['has_translation'] ?? translationText.trim().isNotEmpty,
+      analysis: analysisText.isEmpty ? null : analysisText,
+      translation: translationText.isEmpty ? null : translationText,
       sections: (json['sections'] as Map?)?.cast<String, String>(),
       notes: (json['notes'] as List?)?.map((n) => Note.fromJson(n)).toList(),
       llmModel: json['llm_model'],

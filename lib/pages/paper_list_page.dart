@@ -185,12 +185,13 @@ class _PaperListPageState extends State<PaperListPage> {
     });
     try {
       final results = await _api.searchResearch(query);
-      final papers = <Paper>[];
-      for (final result in results) {
+      final loaded = await Future.wait(results.map((result) async {
         try {
-          papers.add(await _api.getPaper(result.paperId));
+          return await _api.getPaper(result.paperId);
         } catch (_) {}
-      }
+        return null;
+      }));
+      final papers = loaded.whereType<Paper>().toList();
       if (!mounted || query != _searchController.text.trim()) return;
       setState(() {
         _ragPapers = papers;
